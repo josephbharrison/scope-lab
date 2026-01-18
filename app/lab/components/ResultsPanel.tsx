@@ -14,6 +14,24 @@ import {
 } from '../../../src/ui/format';
 import { TopTable } from './TopTable';
 
+function WarningsBlock(props: { warnings?: string[] }) {
+  const w = props.warnings;
+  if (!w || w.length === 0) return null;
+
+  return (
+    <div className='rounded-lg border border-amber-200 bg-amber-50 p-3'>
+      <div className='text-xs font-medium text-amber-900'>
+        Auto-tuned constraints
+      </div>
+      <ul className='mt-2 list-disc pl-5 text-xs text-amber-900'>
+        {w.map((x, i) => (
+          <li key={`${i}-${x}`}>{x}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
 export function ResultsPanel(props: {
   result: SweepResult | null;
   tubeUnits: Units;
@@ -50,7 +68,14 @@ export function ResultsPanel(props: {
             Run
           </button>
         </div>
-        <div className='mt-3'>No passing candidates.</div>
+
+        <div className='mt-3 flex flex-col gap-3'>
+          <WarningsBlock warnings={r.warnings} />
+          <div>No passing candidates.</div>
+          <div className='text-xs text-zinc-500'>
+            Candidates generated: {r.candidates.length} | Passing: 0
+          </div>
+        </div>
       </div>
     );
   }
@@ -71,6 +96,8 @@ export function ResultsPanel(props: {
       </div>
 
       <div className='mt-3 flex flex-col gap-4'>
+        <WarningsBlock warnings={r.warnings} />
+
         <div className='rounded-lg border border-zinc-200 bg-white p-3'>
           <div className='text-xs text-zinc-500'>Best overall</div>
           <div className='mt-1 font-medium text-zinc-900'>

@@ -16,6 +16,7 @@ export type SweepResult = {
   top: Candidate[];
   derivedSpec?: InputSpec;
   warnings?: string[];
+  appliedSpec?: InputSpec;
 };
 
 function checkConstraints(spec: InputSpec, c: Candidate): Candidate {
@@ -305,7 +306,17 @@ export function inferDerivedLimits(spec: InputSpec): InputSpec {
   };
 }
 
-export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
+function computeSweep(
+  spec: InputSpec,
+  topN: number,
+): {
+  candidates: Candidate[];
+  passing: Candidate[];
+  ranked: Candidate[];
+  bestByKind: Record<OpticDesignKind, Candidate | null>;
+  bestOverall: Candidate | null;
+  top: Candidate[];
+} {
   const candidates: Candidate[] = [];
 
   const fpValues = enumerateRange(
@@ -356,19 +367,14 @@ export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
     rc: null,
   };
 
-  const adj = inferConstraintAdjustments(spec);
-  const derivedSpec = inferDerivedLimits(adj.spec);
-  const warnings = adj.warnings;
-
   if (passing.length === 0) {
     return {
       candidates,
+      passing,
       ranked: [],
-      bestOverall: null,
       bestByKind,
+      bestOverall: null,
       top: [],
-      derivedSpec,
-      warnings,
     };
   }
 
@@ -386,11 +392,65 @@ export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
 
   return {
     candidates,
+    passing,
     ranked: scored,
-    bestOverall,
     bestByKind,
+    bestOverall,
     top,
+  };
+}
+
+export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
+  const adj = inferConstraintAdjustments(spec);
+  const baseSpec = adj.spec;
+  const warnings = adj.warnings;
+
+  const appliedSpec =
+    JSON.stringify(baseSpec) !== JSON.stringify(spec) ? baseSpec : undefined;
+
+  const first = computeSweep(baseSpec, topN);
+
+  const derivedSpec = inferDerivedLimits(baseSpec);
+
+  if (first.passing.length > 0) {
+    return {
+      candidates: first.candidates,
+      ranked: first.ranked,
+      bestOverall: first.bestOverall,
+      bestByKind: first.bestByKind,
+      top: first.top,
+      derivedSpec,
+      warnings,
+      appliedSpec,
+    };
+  }
+
+  if (
+    warnings.length > 0 &&
+    JSON.stringify(baseSpec) !== JSON.stringify(spec)
+  ) {
+    const second = computeSweep(baseSpec, topN);
+
+    return {
+      candidates: second.candidates,
+      ranked: second.ranked,
+      bestOverall: second.bestOverall,
+      bestByKind: second.bestByKind,
+      top: second.top,
+      derivedSpec,
+      warnings,
+      appliedSpec,
+    };
+  }
+
+  return {
+    candidates: first.candidates,
+    ranked: [],
+    bestOverall: null,
+    bestByKind: first.bestByKind,
+    top: [],
     derivedSpec,
     warnings,
+    appliedSpec,
   };
 }

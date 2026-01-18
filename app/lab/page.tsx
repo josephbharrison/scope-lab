@@ -4,7 +4,7 @@ import { useMemo, useState } from 'react';
 import type { InputSpec } from '../../src/optics/types';
 import type { SweepResult } from '../../src/optics/sweep';
 
-import { runSweep } from '../../src/optics/sweep';
+import { inferDerivedLimits, runSweep } from '../../src/optics/sweep';
 import { presets } from '../../src/ui/presets';
 import { defaultLabState } from '../../src/ui/state';
 
@@ -71,45 +71,161 @@ function toUnits(mm: number, units: 'mm' | 'inch'): number {
   return units === 'mm' ? mm : mm / 25.4;
 }
 
+function mergeWarnings(a: string[], b: string[]): string[] {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  const s = new Set<string>();
+  for (const x of a) s.add(x);
+  for (const x of b) s.add(x);
+  return Array.from(s);
+}
+
+function clampRange(
+  label: string,
+  min: number,
+  max: number,
+  limMin: number,
+  limMax: number,
+  warnings: string[]
+): { min: number; max: number } {
+  let nextMin = clampFinite(min, limMin);
+  let nextMax = clampFinite(max, limMax);
+
+  if (nextMax < nextMin) {
+    const t = nextMin;
+    nextMin = nextMax;
+    nextMax = t;
+  }
+
+  const beforeMin = nextMin;
+  const beforeMax = nextMax;
+
+  nextMin = Math.max(limMin, Math.min(limMax, nextMin));
+  nextMax = Math.max(limMin, Math.min(limMax, nextMax));
+
+  if (nextMax < nextMin) nextMax = nextMin;
+
+  if (
+    Math.abs(beforeMin - nextMin) > 1e-12 ||
+    Math.abs(beforeMax - nextMax) > 1e-12
+  ) {
+    warnings.push(
+      `${label} clamped to [${nextMin.toFixed(2)}, ${nextMax.toFixed(2)}]`
+    );
+  }
+
+  return { min: nextMin, max: nextMax };
+}
+
 function ensureFeasibleSpec(spec: InputSpec): {
   spec: InputSpec;
   warnings: string[];
 } {
   const warnings: string[] = [];
 
-  if (!isNewtonianOnly(spec)) {
-    return { spec, warnings };
-  }
+  let next: InputSpec = spec;
 
-  const D_mm = toMm(spec.aperture, spec.apertureUnits);
-  const F = clampFinite(spec.targetSystemFRatio, 1);
-  const requiredTube_mm = F * D_mm + DEFAULT_TUBE_MARGIN_MM;
-
-  const tubeUnits = spec.constraints.tubeLengthUnits;
-  const requiredTube_units = toUnits(requiredTube_mm, tubeUnits);
-  const currentMax_units = clampFinite(
-    spec.constraints.maxTubeLength,
-    requiredTube_units
-  );
-
-  if (currentMax_units + 1e-9 < requiredTube_units) {
-    warnings.push(
-      `Max tube length increased to ${requiredTube_units.toFixed(2)} ${tubeUnits} to support f/${F.toFixed(2)} Newtonian`
-    );
-
-    return {
-      spec: {
-        ...spec,
-        constraints: {
-          ...spec.constraints,
-          maxTubeLength: requiredTube_units,
-        },
+  const primaryStep = clampFinite(next.sweep.primaryFRatioStep, 0.25);
+  if (primaryStep <= 0) {
+    warnings.push('Primary f-ratio step increased to 0.25');
+    next = {
+      ...next,
+      sweep: {
+        ...next.sweep,
+        primaryFRatioStep: 0.25,
       },
-      warnings,
     };
   }
 
-  return { spec, warnings };
+  const systemStep = clampFinite(next.sweep.systemFRatioStep, 0.5);
+  if (!isNewtonianOnly(next) && systemStep <= 0) {
+    warnings.push('System f-ratio step increased to 0.5');
+    next = {
+      ...next,
+      sweep: {
+        ...next.sweep,
+        systemFRatioStep: 0.5,
+      },
+    };
+  }
+
+  const dl = next.derivedLimits;
+
+  if (
+    dl?.primaryFRatio?.min !== undefined &&
+    dl?.primaryFRatio?.max !== undefined
+  ) {
+    const r = clampRange(
+      'Primary f-ratio range',
+      next.sweep.primaryFRatioMin,
+      next.sweep.primaryFRatioMax,
+      dl.primaryFRatio.min,
+      dl.primaryFRatio.max,
+      warnings
+    );
+
+    next = {
+      ...next,
+      sweep: {
+        ...next.sweep,
+        primaryFRatioMin: r.min,
+        primaryFRatioMax: r.max,
+      },
+    };
+  }
+
+  if (
+    !isNewtonianOnly(next) &&
+    dl?.systemFRatio?.min !== undefined &&
+    dl?.systemFRatio?.max !== undefined
+  ) {
+    const r = clampRange(
+      'System f-ratio range',
+      next.sweep.systemFRatioMin,
+      next.sweep.systemFRatioMax,
+      dl.systemFRatio.min,
+      dl.systemFRatio.max,
+      warnings
+    );
+
+    next = {
+      ...next,
+      sweep: {
+        ...next.sweep,
+        systemFRatioMin: r.min,
+        systemFRatioMax: r.max,
+      },
+    };
+  }
+
+  if (isNewtonianOnly(next)) {
+    const D_mm = toMm(next.aperture, next.apertureUnits);
+    const F = clampFinite(next.targetSystemFRatio, 1);
+    const requiredTube_mm = F * D_mm + DEFAULT_TUBE_MARGIN_MM;
+
+    const tubeUnits = next.constraints.tubeLengthUnits;
+    const requiredTube_units = toUnits(requiredTube_mm, tubeUnits);
+    const currentMax_units = clampFinite(
+      next.constraints.maxTubeLength,
+      requiredTube_units
+    );
+
+    if (currentMax_units + 1e-9 < requiredTube_units) {
+      warnings.push(
+        `Max tube length increased to ${requiredTube_units.toFixed(2)} ${tubeUnits} to support f/${F.toFixed(2)} Newtonian`
+      );
+
+      next = {
+        ...next,
+        constraints: {
+          ...next.constraints,
+          maxTubeLength: requiredTube_units,
+        },
+      };
+    }
+  }
+
+  return { spec: next, warnings };
 }
 
 function ToggleSwitch(props: {
@@ -169,8 +285,9 @@ export default function LabPage() {
 
   const [syncMode, setSyncMode] = useState<SyncMode>('design');
 
-  const boot = reconcile(structuredClone(initial.spec), 'design');
-  const bootFeasible = ensureFeasibleSpec(boot);
+  const boot0 = reconcile(structuredClone(initial.spec), 'design');
+  const boot1 = inferDerivedLimits(boot0);
+  const bootFeasible = ensureFeasibleSpec(boot1);
 
   const [spec, setSpec] = useState<InputSpec>(() =>
     structuredClone(bootFeasible.spec)
@@ -189,41 +306,46 @@ export default function LabPage() {
     return found ? found.id : '';
   }, [spec]);
 
-  function applySpec(next: InputSpec) {
-    const tuned = ensureFeasibleSpec(next);
+  function applySpec(next: InputSpec, extraWarnings: string[] = []) {
+    const withLimits = inferDerivedLimits(next);
+    const tuned = ensureFeasibleSpec(withLimits);
     setSpec(structuredClone(tuned.spec));
-    setWarnings(tuned.warnings);
+    setWarnings(mergeWarnings(tuned.warnings, extraWarnings));
     return tuned;
   }
 
-  function runWithSpec(nextSpec: InputSpec, nextWarnings: string[]) {
-    setWarnings(nextWarnings);
-    const next = runSweep(nextSpec, topN);
-    setResult(structuredClone(next));
-  }
-
   function runAction() {
-    const tuned = ensureFeasibleSpec(spec);
-    const tunedSpec = tuned.spec;
+    const withLimits = inferDerivedLimits(spec);
+    const tuned0 = ensureFeasibleSpec(withLimits);
 
-    if (JSON.stringify(tunedSpec) !== JSON.stringify(spec)) {
-      setSpec(structuredClone(tunedSpec));
+    if (JSON.stringify(tuned0.spec) !== JSON.stringify(spec)) {
+      setSpec(structuredClone(tuned0.spec));
     }
 
-    const next = runSweep(tunedSpec, topN);
-    const derived = next.derivedSpec
-      ? ensureFeasibleSpec(next.derivedSpec)
-      : null;
+    const next = runSweep(tuned0.spec, topN);
 
-    if (derived && JSON.stringify(derived.spec) !== JSON.stringify(tunedSpec)) {
-      setSpec(structuredClone(derived.spec));
-      setWarnings(derived.warnings);
-      const rerun = runSweep(derived.spec, topN);
+    const sweepWarnings = Array.isArray(next.warnings) ? next.warnings : [];
+    const combined0 = mergeWarnings(tuned0.warnings, sweepWarnings);
+
+    const applied =
+      (next as SweepResult & { appliedSpec?: InputSpec }).appliedSpec ??
+      tuned0.spec;
+
+    const derived0 = next.derivedSpec ?? applied;
+    const derived1 = inferDerivedLimits(derived0);
+    const tuned1 = ensureFeasibleSpec(derived1);
+
+    const combined1 = mergeWarnings(tuned1.warnings, sweepWarnings);
+
+    if (JSON.stringify(tuned1.spec) !== JSON.stringify(tuned0.spec)) {
+      setSpec(structuredClone(tuned1.spec));
+      setWarnings(combined1);
+      const rerun = runSweep(tuned1.spec, topN);
       setResult(structuredClone(rerun));
       return;
     }
 
-    setWarnings(tuned.warnings);
+    setWarnings(combined0);
     setResult(structuredClone(next));
   }
 
@@ -232,7 +354,8 @@ export default function LabPage() {
 
     setSpec((prev) => {
       const next = reconcile(prev, nextMode);
-      const tuned = ensureFeasibleSpec(next);
+      const withLimits = inferDerivedLimits(next);
+      const tuned = ensureFeasibleSpec(withLimits);
       setWarnings(tuned.warnings);
       return structuredClone(tuned.spec);
     });
@@ -243,13 +366,19 @@ export default function LabPage() {
   function setSpecFromDesign(next: InputSpec) {
     const reconciled = reconcileFromDesign(next);
     const tuned = applySpec(reconciled);
-    setResult(structuredClone(runSweep(tuned.spec, topN)));
+    const r = runSweep(tuned.spec, topN);
+    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
+    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
+    setResult(structuredClone(r));
   }
 
   function setSpecFromSweep(next: InputSpec) {
     const reconciled = reconcileFromSweep(next);
     const tuned = applySpec(reconciled);
-    setResult(structuredClone(runSweep(tuned.spec, topN)));
+    const r = runSweep(tuned.spec, topN);
+    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
+    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
+    setResult(structuredClone(r));
   }
 
   function loadPresetAction(id: string) {
@@ -260,7 +389,10 @@ export default function LabPage() {
 
     const nextSpec = reconcile(structuredClone(p.spec), syncMode);
     const tuned = applySpec(nextSpec);
-    setResult(structuredClone(runSweep(tuned.spec, topN)));
+    const r = runSweep(tuned.spec, topN);
+    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
+    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
+    setResult(structuredClone(r));
   }
 
   function loadSpecAction(nextSpec: InputSpec, nextTopN: number) {
@@ -268,7 +400,10 @@ export default function LabPage() {
 
     const reconciled = reconcile(structuredClone(nextSpec), syncMode);
     const tuned = applySpec(reconciled);
-    setResult(structuredClone(runSweep(tuned.spec, nextTopN)));
+    const r = runSweep(tuned.spec, nextTopN);
+    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
+    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
+    setResult(structuredClone(r));
   }
 
   function setTopNAction(next: number) {
