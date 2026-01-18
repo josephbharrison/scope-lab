@@ -7,6 +7,7 @@ import {
   DEFAULT_TUBE_MARGIN_MM,
   SCT_ABERRATION_PENALTY,
   SCT_BAFFLE_FACTOR,
+  TARGET_FRATIO_MISMATCH_COEFFICIENT,
 } from "../constants";
 import { twoMirrorLayout } from "./twoMirror";
 
@@ -47,7 +48,12 @@ export const sct: DesignGenerator = (
     (primaryArea_mm2 - obstructionArea_mm2) * transmissionFactor;
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
-  const proxyScore = SCT_ABERRATION_PENALTY * (Fs / Fp);
+  const baseProxy = SCT_ABERRATION_PENALTY * (Fs / Fp);
+
+  const target = spec.targetSystemFRatio;
+  const denom = target > 0 ? target : 1;
+  const rel = Math.abs(Fs - target) / denom;
+  const proxyScore = baseProxy * (1 + TARGET_FRATIO_MISMATCH_COEFFICIENT * rel);
 
   return {
     id: `sct-Fp${Fp.toFixed(2)}-Fs${Fs.toFixed(2)}`,

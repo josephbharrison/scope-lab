@@ -17,19 +17,48 @@ function toggleKind(
   return [...kinds, kind];
 }
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function getAtPath(root: unknown, path: string[]): unknown {
+  let cur: unknown = root;
+
+  for (const key of path) {
+    if (Array.isArray(cur)) {
+      const idx = Number(key);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length)
+        return undefined;
+      cur = cur[idx];
+      continue;
+    }
+
+    if (isRecord(cur)) {
+      cur = cur[key];
+      continue;
+    }
+
+    return undefined;
+  }
+
+  return cur;
+}
+
 function getNumberFallback(spec: InputSpec, path: string[]): number {
-  let cur: unknown = spec;
-  for (const p of path) cur = (cur as any)[p];
-  return typeof cur === 'number' && Number.isFinite(cur) ? cur : 0;
+  const v = getAtPath(spec, path);
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
 export function SpecEditor(props: {
   spec: InputSpec;
   setSpecAction: (s: InputSpec) => void;
+  disabled?: boolean;
 }) {
   const spec = props.spec;
+  const disabled = props.disabled === true;
 
   function updateNumber(path: string, v: string) {
+    if (disabled) return;
     const parts = path.split('.');
     const fallback = getNumberFallback(spec, parts);
     const next = asNumber(v, fallback);
@@ -37,11 +66,13 @@ export function SpecEditor(props: {
   }
 
   function updateUnits(path: string, v: Units) {
+    if (disabled) return;
     const parts = path.split('.');
     props.setSpecAction(setIn(spec, parts, v));
   }
 
   function updateKinds(kind: OpticDesignKind) {
+    if (disabled) return;
     props.setSpecAction({
       ...spec,
       designKinds: toggleKind(spec.designKinds, kind),
@@ -60,6 +91,7 @@ export function SpecEditor(props: {
                   type='checkbox'
                   checked={spec.designKinds.includes(k)}
                   onChange={() => updateKinds(k)}
+                  disabled={disabled}
                 />
                 <span className='capitalize'>{k}</span>
               </label>
@@ -73,10 +105,11 @@ export function SpecEditor(props: {
           <label className='text-sm font-medium'>Aperture</label>
           <div className='flex gap-2'>
             <input
-              className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
+              className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
               type='number'
               value={spec.aperture}
               onChange={(e) => updateNumber('aperture', e.target.value)}
+              disabled={disabled}
             />
             <UnitsField
               value={spec.apertureUnits}
@@ -100,12 +133,13 @@ export function SpecEditor(props: {
             <label className='text-sm font-medium'>Max tube length</label>
             <div className='flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
                 type='number'
                 value={spec.constraints.maxTubeLength}
                 onChange={(e) =>
                   updateNumber('constraints.maxTubeLength', e.target.value)
                 }
+                disabled={disabled}
               />
               <UnitsField
                 value={spec.constraints.tubeLengthUnits}
@@ -129,12 +163,13 @@ export function SpecEditor(props: {
             <label className='text-sm font-medium'>Min backfocus</label>
             <div className='flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
                 type='number'
                 value={spec.constraints.minBackFocus}
                 onChange={(e) =>
                   updateNumber('constraints.minBackFocus', e.target.value)
                 }
+                disabled={disabled}
               />
               <UnitsField
                 value={spec.constraints.backFocusUnits}
@@ -152,7 +187,7 @@ export function SpecEditor(props: {
             </label>
             <div className='flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
                 type='number'
                 value={spec.constraints.fullyIlluminatedFieldRadius}
                 onChange={(e) =>
@@ -161,6 +196,7 @@ export function SpecEditor(props: {
                     e.target.value
                   )
                 }
+                disabled={disabled}
               />
               <UnitsField
                 value={spec.constraints.fieldUnits}
@@ -193,6 +229,12 @@ export function SpecEditor(props: {
           />
         </div>
       </div>
+
+      {disabled ? (
+        <div className='rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600'>
+          Locked: Sweep drives target
+        </div>
+      ) : null}
     </div>
   );
 }

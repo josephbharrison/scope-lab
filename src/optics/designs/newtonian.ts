@@ -6,6 +6,7 @@ import {
   COMA_PROXY_COEFFICIENT,
   NEWTONIAN_INTERCEPT_FRACTION,
   DEFAULT_TUBE_MARGIN_MM,
+  TARGET_FRATIO_MISMATCH_COEFFICIENT,
 } from "../constants";
 
 export const newtonian: DesignGenerator = (
@@ -54,7 +55,12 @@ export const newtonian: DesignGenerator = (
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
   // Aberration proxy: coma-dominated, scales as 1 / F^2
-  const proxyScore = COMA_PROXY_COEFFICIENT / (Fp * Fp);
+  const baseProxy = COMA_PROXY_COEFFICIENT / (Fp * Fp);
+
+  const target = spec.targetSystemFRatio;
+  const denom = target > 0 ? target : 1;
+  const rel = Math.abs(Fp - target) / denom;
+  const proxyScore = baseProxy * (1 + TARGET_FRATIO_MISMATCH_COEFFICIENT * rel);
 
   return {
     id: `newtonian-F${Fp.toFixed(2)}`,

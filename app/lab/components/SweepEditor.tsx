@@ -4,19 +4,48 @@ import type { InputSpec } from '../../../src/optics/types';
 import { NumberField } from './NumberField';
 import { asNumber, setIn } from './fields';
 
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+function getAtPath(root: unknown, path: string[]): unknown {
+  let cur: unknown = root;
+
+  for (const key of path) {
+    if (Array.isArray(cur)) {
+      const idx = Number(key);
+      if (!Number.isInteger(idx) || idx < 0 || idx >= cur.length)
+        return undefined;
+      cur = cur[idx];
+      continue;
+    }
+
+    if (isRecord(cur)) {
+      cur = cur[key];
+      continue;
+    }
+
+    return undefined;
+  }
+
+  return cur;
+}
+
 function getNumberFallback(spec: InputSpec, path: string[]): number {
-  let cur: unknown = spec;
-  for (const p of path) cur = (cur as any)[p];
-  return typeof cur === 'number' && Number.isFinite(cur) ? cur : 0;
+  const v = getAtPath(spec, path);
+  return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
 export function SweepEditor(props: {
   spec: InputSpec;
   setSpecAction: (s: InputSpec) => void;
+  disabled?: boolean;
 }) {
   const spec = props.spec;
+  const disabled = props.disabled === true;
 
   function updateNumber(path: string, v: string) {
+    if (disabled) return;
     const parts = path.split('.');
     const fallback = getNumberFallback(spec, parts);
     const next = asNumber(v, fallback);
@@ -98,6 +127,12 @@ export function SweepEditor(props: {
           />
         </div>
       </div>
+
+      {disabled ? (
+        <div className='rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600'>
+          Locked: Design drives sweep
+        </div>
+      ) : null}
     </div>
   );
 }

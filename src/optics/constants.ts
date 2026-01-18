@@ -1,7 +1,7 @@
 /*
   Shared numerical defaults and coefficients for scope-lab optics engine.
 */
-
+export const TARGET_FRATIO_MISMATCH_COEFFICIENT = 0.35;
 export const DEFAULT_REFLECTIVITY_PER_MIRROR = 0.9;
 export const DEFAULT_CORRECTOR_TRANSMISSION = 0.9;
 
