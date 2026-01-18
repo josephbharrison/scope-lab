@@ -16,6 +16,9 @@ import { SweepEditor } from './components/SweepEditor';
 import { ResultsPanel } from './components/ResultsPanel';
 import { Export } from './components/Export';
 
+import { toMm } from '../../src/optics/units';
+import { DEFAULT_TUBE_MARGIN_MM } from '../../src/optics/constants';
+
 type SyncMode = 'design' | 'sweep';
 
 function clampFinite(v: number, fallback: number): number {
@@ -58,6 +61,55 @@ function reconcile(spec: InputSpec, mode: SyncMode): InputSpec {
   return mode === 'design'
     ? reconcileFromDesign(spec)
     : reconcileFromSweep(spec);
+}
+
+function isNewtonianOnly(spec: InputSpec): boolean {
+  return spec.designKinds.length === 1 && spec.designKinds[0] === 'newtonian';
+}
+
+function toUnits(mm: number, units: 'mm' | 'inch'): number {
+  return units === 'mm' ? mm : mm / 25.4;
+}
+
+function ensureFeasibleSpec(spec: InputSpec): {
+  spec: InputSpec;
+  warnings: string[];
+} {
+  const warnings: string[] = [];
+
+  if (!isNewtonianOnly(spec)) {
+    return { spec, warnings };
+  }
+
+  const D_mm = toMm(spec.aperture, spec.apertureUnits);
+  const F = clampFinite(spec.targetSystemFRatio, 1);
+  const requiredTube_mm = F * D_mm + DEFAULT_TUBE_MARGIN_MM;
+
+  const tubeUnits = spec.constraints.tubeLengthUnits;
+  const requiredTube_units = toUnits(requiredTube_mm, tubeUnits);
+  const currentMax_units = clampFinite(
+    spec.constraints.maxTubeLength,
+    requiredTube_units
+  );
+
+  if (currentMax_units + 1e-9 < requiredTube_units) {
+    warnings.push(
+      `Max tube length increased to ${requiredTube_units.toFixed(2)} ${tubeUnits} to support f/${F.toFixed(2)} Newtonian`
+    );
+
+    return {
+      spec: {
+        ...spec,
+        constraints: {
+          ...spec.constraints,
+          maxTubeLength: requiredTube_units,
+        },
+      },
+      warnings,
+    };
+  }
+
+  return { spec, warnings };
 }
 
 function ToggleSwitch(props: {
@@ -117,12 +169,18 @@ export default function LabPage() {
 
   const [syncMode, setSyncMode] = useState<SyncMode>('design');
 
+  const boot = reconcile(structuredClone(initial.spec), 'design');
+  const bootFeasible = ensureFeasibleSpec(boot);
+
   const [spec, setSpec] = useState<InputSpec>(() =>
-    reconcile(structuredClone(initial.spec), 'design')
+    structuredClone(bootFeasible.spec)
   );
   const [topN, setTopN] = useState<number>(initial.topN);
   const [result, setResult] = useState<SweepResult | null>(null);
   const [loadedSpecFilename, setLoadedSpecFilename] = useState<string>('');
+  const [warnings, setWarnings] = useState<string[]>(
+    () => bootFeasible.warnings
+  );
 
   const currentPresetId = useMemo(() => {
     const found = presets.find(
@@ -131,43 +189,86 @@ export default function LabPage() {
     return found ? found.id : '';
   }, [spec]);
 
+  function applySpec(next: InputSpec) {
+    const tuned = ensureFeasibleSpec(next);
+    setSpec(structuredClone(tuned.spec));
+    setWarnings(tuned.warnings);
+    return tuned;
+  }
+
+  function runWithSpec(nextSpec: InputSpec, nextWarnings: string[]) {
+    setWarnings(nextWarnings);
+    const next = runSweep(nextSpec, topN);
+    setResult(structuredClone(next));
+  }
+
   function runAction() {
-    const next = runSweep(spec, topN);
+    const tuned = ensureFeasibleSpec(spec);
+    const tunedSpec = tuned.spec;
+
+    if (JSON.stringify(tunedSpec) !== JSON.stringify(spec)) {
+      setSpec(structuredClone(tunedSpec));
+    }
+
+    const next = runSweep(tunedSpec, topN);
+    const derived = next.derivedSpec
+      ? ensureFeasibleSpec(next.derivedSpec)
+      : null;
+
+    if (derived && JSON.stringify(derived.spec) !== JSON.stringify(tunedSpec)) {
+      setSpec(structuredClone(derived.spec));
+      setWarnings(derived.warnings);
+      const rerun = runSweep(derived.spec, topN);
+      setResult(structuredClone(rerun));
+      return;
+    }
+
+    setWarnings(tuned.warnings);
     setResult(structuredClone(next));
   }
 
   function setSyncModeAction(nextMode: SyncMode) {
     setSyncMode(nextMode);
-    setSpec((prev) => reconcile(prev, nextMode));
+
+    setSpec((prev) => {
+      const next = reconcile(prev, nextMode);
+      const tuned = ensureFeasibleSpec(next);
+      setWarnings(tuned.warnings);
+      return structuredClone(tuned.spec);
+    });
+
     setResult(null);
   }
 
   function setSpecFromDesign(next: InputSpec) {
     const reconciled = reconcileFromDesign(next);
-    setSpec(structuredClone(reconciled));
-    setResult(null);
+    const tuned = applySpec(reconciled);
+    setResult(structuredClone(runSweep(tuned.spec, topN)));
   }
 
   function setSpecFromSweep(next: InputSpec) {
     const reconciled = reconcileFromSweep(next);
-    setSpec(structuredClone(reconciled));
-    setResult(null);
+    const tuned = applySpec(reconciled);
+    setResult(structuredClone(runSweep(tuned.spec, topN)));
   }
 
   function loadPresetAction(id: string) {
     const p = presets.find((x) => x.id === id);
     if (!p) return;
+
     setLoadedSpecFilename('');
+
     const nextSpec = reconcile(structuredClone(p.spec), syncMode);
-    setSpec(nextSpec);
-    setResult(structuredClone(runSweep(nextSpec, topN)));
+    const tuned = applySpec(nextSpec);
+    setResult(structuredClone(runSweep(tuned.spec, topN)));
   }
 
   function loadSpecAction(nextSpec: InputSpec, nextTopN: number) {
     setTopN(nextTopN);
+
     const reconciled = reconcile(structuredClone(nextSpec), syncMode);
-    setSpec(reconciled);
-    setResult(structuredClone(runSweep(reconciled, nextTopN)));
+    const tuned = applySpec(reconciled);
+    setResult(structuredClone(runSweep(tuned.spec, nextTopN)));
   }
 
   function setTopNAction(next: number) {
@@ -232,6 +333,19 @@ export default function LabPage() {
             </div>
           </div>
         </section>
+
+        {warnings.length > 0 ? (
+          <section className='rounded-xl border border-amber-200 bg-amber-50 p-4'>
+            <div className='text-sm font-medium text-amber-900'>
+              Auto-tuned constraints
+            </div>
+            <ul className='mt-2 list-disc pl-5 text-sm text-amber-900'>
+              {warnings.map((w, i) => (
+                <li key={`${i}-${w}`}>{w}</li>
+              ))}
+            </ul>
+          </section>
+        ) : null}
 
         <section className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
           <div

@@ -3,6 +3,20 @@ export function asNumber(v: string, fallback: number): number {
   return Number.isFinite(n) ? n : fallback;
 }
 
+export function asClampedNumber(
+  v: string,
+  fallback: number,
+  min?: number,
+  max?: number
+): number {
+  const n = Number(v);
+  if (!Number.isFinite(n)) return fallback;
+
+  if (typeof min === 'number' && n < min) return min;
+  if (typeof max === 'number' && n > max) return max;
+  return n;
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }

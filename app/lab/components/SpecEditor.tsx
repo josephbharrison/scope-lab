@@ -5,6 +5,10 @@ import type {
   OpticDesignKind,
   Units,
 } from '../../../src/optics/types';
+
+import { toMm } from '../../../src/optics/units';
+import { DEFAULT_TUBE_MARGIN_MM } from '../../../src/optics/constants';
+
 import { NumberField } from './NumberField';
 import { UnitsField } from './UnitsField';
 import { asNumber, setIn } from './fields';
@@ -49,6 +53,28 @@ function getNumberFallback(spec: InputSpec, path: string[]): number {
   return typeof v === 'number' && Number.isFinite(v) ? v : 0;
 }
 
+function fromMm(mm: number, units: Units): number {
+  return units === 'inch' ? mm / 25.4 : mm;
+}
+
+function computeRequiredMaxTube(spec: InputSpec): number | null {
+  const kinds = spec.designKinds;
+  const isNewtonianOnly = kinds.length === 1 && kinds[0] === 'newtonian';
+  if (!isNewtonianOnly) return null;
+
+  const D_mm = toMm(spec.aperture, spec.apertureUnits);
+  const Fp = Number.isFinite(spec.targetSystemFRatio)
+    ? spec.targetSystemFRatio
+    : 0;
+
+  if (!(Number.isFinite(D_mm) && D_mm > 0 && Fp > 0)) return null;
+
+  const required_mm = Fp * D_mm + DEFAULT_TUBE_MARGIN_MM;
+  if (!(Number.isFinite(required_mm) && required_mm > 0)) return null;
+
+  return fromMm(required_mm, spec.constraints.tubeLengthUnits);
+}
+
 export function SpecEditor(props: {
   spec: InputSpec;
   setSpecAction: (s: InputSpec) => void;
@@ -57,11 +83,23 @@ export function SpecEditor(props: {
   const spec = props.spec;
   const disabled = props.disabled === true;
 
+  const requiredMaxTube = computeRequiredMaxTube(spec);
+  const maxTubeHint =
+    requiredMaxTube !== null
+      ? `Requires >= ${requiredMaxTube.toFixed(2)} ${spec.constraints.tubeLengthUnits} for selected design(s)`
+      : '';
+
   function updateNumber(path: string, v: string) {
     if (disabled) return;
     const parts = path.split('.');
     const fallback = getNumberFallback(spec, parts);
-    const next = asNumber(v, fallback);
+    let next = asNumber(v, fallback);
+
+    if (path === 'constraints.maxTubeLength' && requiredMaxTube !== null) {
+      if (Number.isFinite(next) && next < requiredMaxTube)
+        next = requiredMaxTube;
+    }
+
     props.setSpecAction(setIn(spec, parts, next));
   }
 
@@ -80,7 +118,9 @@ export function SpecEditor(props: {
   }
 
   return (
-    <div className='flex flex-col gap-6'>
+    <div
+      className={`flex flex-col gap-6 ${disabled ? 'opacity-60 pointer-events-none' : ''}`}
+    >
       <div>
         <h2 className='text-lg font-semibold'>Design selection</h2>
         <div className='mt-4 grid grid-cols-2 gap-3'>
@@ -105,7 +145,7 @@ export function SpecEditor(props: {
           <label className='text-sm font-medium'>Aperture</label>
           <div className='flex gap-2'>
             <input
-              className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
+              className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
               type='number'
               value={spec.aperture}
               onChange={(e) => updateNumber('aperture', e.target.value)}
@@ -123,19 +163,24 @@ export function SpecEditor(props: {
           value={spec.targetSystemFRatio}
           step={0.1}
           setValueAction={(v) => updateNumber('targetSystemFRatio', v)}
+          disabled={disabled}
         />
       </div>
 
       <div>
         <h3 className='text-sm font-semibold text-zinc-900'>Constraints</h3>
         <div className='mt-3 grid grid-cols-2 gap-4'>
-          <div className='flex flex-col gap-2'>
+          <div className='flex flex-col gap-1'>
             <label className='text-sm font-medium'>Max tube length</label>
-            <div className='flex gap-2'>
+            {maxTubeHint ? (
+              <div className='text-xs text-zinc-500'>{maxTubeHint}</div>
+            ) : null}
+            <div className='mt-1 flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
                 type='number'
                 value={spec.constraints.maxTubeLength}
+                min={requiredMaxTube !== null ? requiredMaxTube : undefined}
                 onChange={(e) =>
                   updateNumber('constraints.maxTubeLength', e.target.value)
                 }
@@ -157,13 +202,14 @@ export function SpecEditor(props: {
             setValueAction={(v) =>
               updateNumber('constraints.maxObstructionRatio', v)
             }
+            disabled={disabled}
           />
 
           <div className='flex flex-col gap-2'>
             <label className='text-sm font-medium'>Min backfocus</label>
             <div className='flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
                 type='number'
                 value={spec.constraints.minBackFocus}
                 onChange={(e) =>
@@ -187,7 +233,7 @@ export function SpecEditor(props: {
             </label>
             <div className='flex gap-2'>
               <input
-                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm disabled:opacity-60'
+                className='w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm'
                 type='number'
                 value={spec.constraints.fullyIlluminatedFieldRadius}
                 onChange={(e) =>
@@ -218,6 +264,7 @@ export function SpecEditor(props: {
             setValueAction={(v) =>
               updateNumber('coatings.reflectivityPerMirror', v)
             }
+            disabled={disabled}
           />
           <NumberField
             label='Corrector transmission'
@@ -226,13 +273,14 @@ export function SpecEditor(props: {
             setValueAction={(v) =>
               updateNumber('coatings.correctorTransmission', v)
             }
+            disabled={disabled}
           />
         </div>
       </div>
 
       {disabled ? (
         <div className='rounded-lg border border-zinc-200 bg-zinc-50 p-3 text-xs text-zinc-600'>
-          Locked: Sweep drives target
+          Locked: sweep parameters drive design targets
         </div>
       ) : null}
     </div>

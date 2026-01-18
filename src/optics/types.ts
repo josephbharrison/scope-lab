@@ -2,6 +2,8 @@ export type OpticDesignKind = "newtonian" | "cassegrain" | "sct" | "rc";
 
 export type Units = "mm" | "inch";
 
+export type ControlMode = "design" | "sweep";
+
 export type ConstraintSpec = {
   maxTubeLength: number;
   tubeLengthUnits: Units;
@@ -33,15 +35,28 @@ export type WeightSpec = {
   obstruction: number;
 };
 
+export type DerivedLimits = {
+  primaryFRatio?: {
+    min: number;
+    max: number;
+  };
+  systemFRatio?: {
+    min: number;
+    max: number;
+  };
+};
+
 export type InputSpec = {
   aperture: number;
   apertureUnits: Units;
   targetSystemFRatio: number;
   designKinds: OpticDesignKind[];
+  controlMode: ControlMode;
   constraints: ConstraintSpec;
   coatings: CoatingSpec;
   sweep: SweepSpec;
   weights: WeightSpec;
+  derivedLimits?: DerivedLimits;
 };
 
 export type GeometryMetrics = {

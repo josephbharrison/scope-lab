@@ -16,30 +16,31 @@ export const newtonian: DesignGenerator = (
   const D_mm = toMm(spec.aperture, spec.apertureUnits);
   const Fp = params.primaryFRatio;
 
-  if (Fp <= 0) return null;
+  if (!Number.isFinite(D_mm) || D_mm <= 0) return null;
+  if (!Number.isFinite(Fp) || Fp <= 0) return null;
 
   const fPrimary_mm = Fp * D_mm;
 
-  // First-order tube length: primary focal length + margin
   const tubeLength_mm = fPrimary_mm + DEFAULT_TUBE_MARGIN_MM;
 
-  // Intercept distance from primary to secondary (first-order proxy)
+  const maxTube_mm = toMm(
+    spec.constraints.maxTubeLength,
+    spec.constraints.tubeLengthUnits,
+  );
+
   const intercept_mm = NEWTONIAN_INTERCEPT_FRACTION * fPrimary_mm;
 
-  // Fully illuminated field radius
   const fieldRadius_mm = toMm(
     spec.constraints.fullyIlluminatedFieldRadius,
     spec.constraints.fieldUnits,
   );
 
-  // Secondary diameter estimate (minor axis)
   const secondaryDiameter_mm =
     (D_mm * intercept_mm) / fPrimary_mm +
     (2 * fieldRadius_mm * (fPrimary_mm - intercept_mm)) / fPrimary_mm;
 
   const obstructionRatio = secondaryDiameter_mm / D_mm;
 
-  // Areas
   const primaryArea_mm2 = areaCircle(D_mm);
   const obstructionArea_mm2 = areaCircle(secondaryDiameter_mm);
 
@@ -54,13 +55,41 @@ export const newtonian: DesignGenerator = (
 
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
-  // Aberration proxy: coma-dominated, scales as 1 / F^2
   const baseProxy = COMA_PROXY_COEFFICIENT / (Fp * Fp);
 
   const target = spec.targetSystemFRatio;
   const denom = target > 0 ? target : 1;
   const rel = Math.abs(Fp - target) / denom;
   const proxyScore = baseProxy * (1 + TARGET_FRATIO_MISMATCH_COEFFICIENT * rel);
+
+  const backFocus_mm = Math.max(0, fPrimary_mm - intercept_mm);
+
+  const reasons: string[] = [];
+
+  if (Number.isFinite(maxTube_mm) && tubeLength_mm > maxTube_mm) {
+    reasons.push(
+      `Tube length requires >= ${tubeLength_mm.toFixed(0)}mm (current max ${maxTube_mm.toFixed(0)}mm)`,
+    );
+  }
+
+  if (obstructionRatio > spec.constraints.maxObstructionRatio) {
+    reasons.push(
+      `Obstruction requires <= ${spec.constraints.maxObstructionRatio.toFixed(2)} (current ${obstructionRatio.toFixed(2)})`,
+    );
+  }
+
+  const minBackFocus_mm = toMm(
+    spec.constraints.minBackFocus,
+    spec.constraints.backFocusUnits,
+  );
+
+  if (Number.isFinite(minBackFocus_mm) && backFocus_mm < minBackFocus_mm) {
+    reasons.push(
+      `Backfocus requires >= ${minBackFocus_mm.toFixed(0)}mm (current ${backFocus_mm.toFixed(0)}mm)`,
+    );
+  }
+
+  const pass = reasons.length === 0;
 
   return {
     id: `newtonian-F${Fp.toFixed(2)}`,
@@ -74,7 +103,7 @@ export const newtonian: DesignGenerator = (
     },
     geometry: {
       tubeLength_mm,
-      backFocus_mm: 0,
+      backFocus_mm,
       secondaryDiameter_mm,
       obstructionRatio,
     },
@@ -89,8 +118,8 @@ export const newtonian: DesignGenerator = (
       proxyScore,
     },
     constraints: {
-      pass: true,
-      reasons: [],
+      pass,
+      reasons,
     },
     score: {
       total: 0,

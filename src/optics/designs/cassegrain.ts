@@ -18,6 +18,9 @@ export const cassegrain: DesignGenerator = (
   const Fp = params.primaryFRatio;
   const Fs = params.systemFRatio;
 
+  if (Fp <= 0 || Fs <= 0) return null;
+  if (Fs <= Fp) return null;
+
   const layout = twoMirrorLayout(spec, D_mm, Fp, Fs);
   if (!layout) return null;
 
@@ -26,11 +29,43 @@ export const cassegrain: DesignGenerator = (
     layout.backFocus_mm +
     DEFAULT_TUBE_MARGIN_MM;
 
+  const maxTube_mm = toMm(
+    spec.constraints.maxTubeLength,
+    spec.constraints.tubeLengthUnits,
+  );
+
   const secondaryDiameter_mm = layout.secondaryDiameter_mm;
   const obstructionDiameter_mm =
     secondaryDiameter_mm * CASSEGRAIN_BAFFLE_FACTOR;
 
   const obstructionRatio = obstructionDiameter_mm / D_mm;
+
+  const reasons: string[] = [];
+
+  if (tubeLength_mm > maxTube_mm) {
+    reasons.push(
+      `Tube length ${tubeLength_mm.toFixed(
+        0,
+      )}mm exceeds max ${maxTube_mm.toFixed(0)}mm`,
+    );
+  }
+
+  if (obstructionRatio > spec.constraints.maxObstructionRatio) {
+    reasons.push(
+      `Obstruction ${obstructionRatio.toFixed(
+        2,
+      )} exceeds max ${spec.constraints.maxObstructionRatio}`,
+    );
+  }
+
+  if (
+    layout.backFocus_mm <
+    toMm(spec.constraints.minBackFocus, spec.constraints.backFocusUnits)
+  ) {
+    reasons.push("Backfocus below minimum");
+  }
+
+  if (reasons.length > 0) return null;
 
   const primaryArea_mm2 = areaCircle(D_mm);
   const obstructionArea_mm2 = areaCircle(obstructionDiameter_mm);
@@ -43,6 +78,7 @@ export const cassegrain: DesignGenerator = (
 
   const effectiveArea_mm2 =
     (primaryArea_mm2 - obstructionArea_mm2) * transmissionFactor;
+
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
   const baseProxy = CASSEGRAIN_ABERRATION_PENALTY * (Fs / Fp);
@@ -84,7 +120,12 @@ export const cassegrain: DesignGenerator = (
     },
     score: {
       total: 0,
-      terms: { usableLight: 0, aberration: 0, tubeLength: 0, obstruction: 0 },
+      terms: {
+        usableLight: 0,
+        aberration: 0,
+        tubeLength: 0,
+        obstruction: 0,
+      },
     },
   };
 };
