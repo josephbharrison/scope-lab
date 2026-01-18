@@ -22,6 +22,7 @@ export default function LabPage() {
   const [spec, setSpec] = useState<InputSpec>(initial.spec);
   const [topN, setTopN] = useState<number>(initial.topN);
   const [result, setResult] = useState<SweepResult | null>(null);
+  const [loadedSpecFilename, setLoadedSpecFilename] = useState<string>('');
 
   const currentPresetId = useMemo(() => {
     const found = presets.find(
@@ -31,24 +32,26 @@ export default function LabPage() {
   }, [spec]);
 
   function runAction() {
-    setResult(runSweep(spec, topN));
+    const next = runSweep(spec, topN);
+    setResult(structuredClone(next));
   }
 
   function loadPresetAction(id: string) {
     const p = presets.find((x) => x.id === id);
     if (!p) return;
+    setLoadedSpecFilename('');
     setSpec(p.spec);
-    setResult(runSweep(p.spec, topN));
+    setResult(structuredClone(runSweep(p.spec, topN)));
   }
 
   function loadSpecAction(nextSpec: InputSpec, nextTopN: number) {
     setSpec(nextSpec);
     setTopN(nextTopN);
-    setResult(runSweep(nextSpec, nextTopN));
+    setResult(structuredClone(runSweep(nextSpec, nextTopN)));
   }
 
   function setSpecAction(next: InputSpec) {
-    setSpec(next);
+    setSpec(structuredClone(next));
   }
 
   function setTopNAction(next: number) {
@@ -67,7 +70,11 @@ export default function LabPage() {
 
         <section className='rounded-xl border border-zinc-200 bg-white p-5'>
           <div className='flex flex-col gap-4 md:flex-row md:items-end md:justify-between'>
-            <LoadSpecPicker loadSpecAction={loadSpecAction} />
+            <LoadSpecPicker
+              value={loadedSpecFilename}
+              setValueAction={setLoadedSpecFilename}
+              loadSpecAction={loadSpecAction}
+            />
             <PresetPicker
               presetId={currentPresetId}
               setPresetIdAction={loadPresetAction}
