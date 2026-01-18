@@ -6,6 +6,10 @@ function finiteOr(v: number, fallback: number): number {
   return Number.isFinite(v) ? v : fallback;
 }
 
+function isFiniteNonNeg(v: number): boolean {
+  return Number.isFinite(v) && v >= 0;
+}
+
 function isFinitePos(v: number): boolean {
   return Number.isFinite(v) && v > 0;
 }
@@ -16,7 +20,7 @@ function airyRadiusMm(F?: number, wavelength_mm = 0.00055): number {
 }
 
 function strehlFromBlurRatio(blurOverAiry: number): number {
-  if (!isFinitePos(blurOverAiry)) return 0;
+  if (!isFiniteNonNeg(blurOverAiry)) return 0;
   const x = 2 * Math.PI * blurOverAiry;
   return Math.exp(-(x * x));
 }
@@ -32,14 +36,15 @@ export function adaptRaytraceToMetrics(
   const tan_mm = finiteOr(iq.spotRmsTan_mm_edge, edge_mm);
   const sag_mm = finiteOr(iq.spotRmsSag_mm_edge, edge_mm);
 
-  const edge = isFinitePos(edge_mm) && isFinitePos(airy) ? edge_mm / airy : NaN;
+  const edge =
+    isFiniteNonNeg(edge_mm) && isFinitePos(airy) ? edge_mm / airy : NaN;
 
   const onAxis =
-    isFinitePos(onAxis_mm) && isFinitePos(airy) ? onAxis_mm / airy : NaN;
+    isFiniteNonNeg(onAxis_mm) && isFinitePos(airy) ? onAxis_mm / airy : NaN;
 
-  const tan = isFinitePos(tan_mm) && isFinitePos(airy) ? tan_mm / airy : NaN;
+  const tan = isFiniteNonNeg(tan_mm) && isFinitePos(airy) ? tan_mm / airy : NaN;
 
-  const sag = isFinitePos(sag_mm) && isFinitePos(airy) ? sag_mm / airy : NaN;
+  const sag = isFiniteNonNeg(sag_mm) && isFinitePos(airy) ? sag_mm / airy : NaN;
 
   const astig =
     Number.isFinite(tan) && Number.isFinite(sag) ? Math.abs(tan - sag) : NaN;

@@ -7,7 +7,12 @@ import {
   NEWTONIAN_INTERCEPT_FRACTION,
   DEFAULT_TUBE_MARGIN_MM,
 } from "../constants";
+import { evaluateImageQualityNewtonian } from "../raytrace/imageQualityNewtonian";
 import { adaptRaytraceToMetrics } from "../raytrace/adapt";
+
+function clampNonNegativeFinite(v: number): number {
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
 
 export const newtonian: DesignGenerator = (
   spec: InputSpec,
@@ -29,9 +34,11 @@ export const newtonian: DesignGenerator = (
 
   const intercept_mm = NEWTONIAN_INTERCEPT_FRACTION * fPrimary_mm;
 
-  const fieldRadius_mm = toMm(
-    spec.constraints.fullyIlluminatedFieldRadius,
-    spec.constraints.fieldUnits,
+  const fieldRadius_mm = clampNonNegativeFinite(
+    toMm(
+      spec.constraints.fullyIlluminatedFieldRadius,
+      spec.constraints.fieldUnits,
+    ),
   );
 
   const secondaryDiameter_mm =
@@ -89,17 +96,40 @@ export const newtonian: DesignGenerator = (
 
   const pass = reasons.length === 0;
 
-  const aberrations = adaptRaytraceToMetrics(
-    {
-      fieldAngle_rad: 0,
-      spotRms_mm_onAxis: 0,
-      spotRms_mm_edge: 0,
-      spotRmsTan_mm_edge: 0,
-      spotRmsSag_mm_edge: 0,
-      bestFocusShift_mm_edge: 0,
-    },
-    Fp,
-  );
+  const fieldAngle = fieldRadius_mm > 0 ? fieldRadius_mm / fPrimary_mm : 0;
+
+  const primary = {
+    z0: 0,
+    R: -2 * fPrimary_mm,
+    K: -1,
+    sagSign: -1 as const,
+    apertureRadius: 0.5 * D_mm,
+  };
+
+  const c45 = Math.SQRT1_2;
+
+  const secondary = {
+    p0: { x: 0, y: 0, z: -intercept_mm },
+    nHat: { x: c45, y: 0, z: c45 },
+    apertureRadius: 0.5 * secondaryDiameter_mm,
+  };
+
+  const imagePlane = {
+    p0: { x: backFocus_mm, y: 0, z: -intercept_mm },
+    nHat: { x: 1, y: 0, z: 0 },
+    apertureRadius: Math.max(1, 2 * fieldRadius_mm),
+  };
+
+  const pres = {
+    primary,
+    secondary,
+    imagePlane,
+    zStart: -5 * fPrimary_mm,
+    pupilRadius: 0.5 * D_mm,
+  };
+
+  const iq = evaluateImageQualityNewtonian(spec, pres, fieldAngle);
+  const aberrations = adaptRaytraceToMetrics(iq, Fp);
 
   return {
     id: `newtonian-F${Fp.toFixed(2)}`,

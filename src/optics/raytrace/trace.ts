@@ -1,10 +1,20 @@
 // src/optics/raytrace/trace.ts
-import type { ConicSurface, Ray, Vec3 } from "./types";
+import type { ConicSurface, PlaneSurface, Ray, Vec3 } from "./types";
 import { add, dot, mul, normalize, sub } from "./math";
 import { sagZ, dsagdrConicUnsigned, surfaceNormal } from "./surface";
 
 function withinAperture(surface: ConicSurface, p: Vec3): boolean {
   const r2 = p.x * p.x + p.y * p.y;
+  return r2 <= surface.apertureRadius * surface.apertureRadius + 1e-12;
+}
+
+function withinAperturePlane(surface: PlaneSurface, p: Vec3): boolean {
+  const dx = p.x - surface.p0.x;
+  const dy = p.y - surface.p0.y;
+  const dz = p.z - surface.p0.z;
+  const dd = dx * dx + dy * dy + dz * dz;
+  const proj = dot({ x: dx, y: dy, z: dz }, normalize(surface.nHat));
+  const r2 = Math.max(0, dd - proj * proj);
   return r2 <= surface.apertureRadius * surface.apertureRadius + 1e-12;
 }
 
@@ -68,6 +78,23 @@ export function propagateToPlaneZ(rayIn: Ray, z: number): Vec3 | null {
   return add(ray.o, mul(ray.d, t));
 }
 
+export function intersectPlane(
+  surface: PlaneSurface,
+  rayIn: Ray,
+): { t: number; p: Vec3 } | null {
+  const ray: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
+  const n = normalize(surface.nHat);
+  const denom = dot(n, ray.d);
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
+
+  const t = dot(n, sub(surface.p0, ray.o)) / denom;
+  if (!Number.isFinite(t) || t < 0) return null;
+
+  const p = add(ray.o, mul(ray.d, t));
+  if (!withinAperturePlane(surface, p)) return null;
+  return { t, p };
+}
+
 export function traceTwoMirror(
   rayIn: Ray,
   primary: ConicSurface,
@@ -91,4 +118,32 @@ export function traceTwoMirror(
   const ray2: Ray = { o: hit2.p, d: d2 };
 
   return propagateToPlaneZ(ray2, imagePlaneZ);
+}
+
+export function traceNewtonian(
+  rayIn: Ray,
+  primary: ConicSurface,
+  secondary: PlaneSurface,
+  imagePlane: PlaneSurface,
+): Vec3 | null {
+  const ray0: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
+
+  const hit1 = intersectConic(primary, ray0);
+  if (!hit1) return null;
+
+  const n1 = surfaceNormal(primary, hit1.p);
+  const d1 = normalize(reflect(ray0.d, n1));
+  const ray1: Ray = { o: hit1.p, d: d1 };
+
+  const hit2 = intersectPlane(secondary, ray1);
+  if (!hit2) return null;
+
+  const n2 = normalize(secondary.nHat);
+  const d2 = normalize(reflect(ray1.d, n2));
+  const ray2: Ray = { o: hit2.p, d: d2 };
+
+  const hit3 = intersectPlane(imagePlane, ray2);
+  if (!hit3) return null;
+
+  return hit3.p;
 }

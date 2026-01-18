@@ -18,10 +18,24 @@ export type ConicSurface = {
   apertureRadius: number;
 };
 
+export type PlaneSurface = {
+  p0: Vec3;
+  nHat: Vec3;
+  apertureRadius: number;
+};
+
 export type TwoMirrorPrescription = {
   primary: ConicSurface;
   secondary: ConicSurface;
   imagePlaneZ: number;
+  zStart: number;
+  pupilRadius: number;
+};
+
+export type NewtonianPrescription = {
+  primary: ConicSurface;
+  secondary: PlaneSurface;
+  imagePlane: PlaneSurface;
   zStart: number;
   pupilRadius: number;
 };
