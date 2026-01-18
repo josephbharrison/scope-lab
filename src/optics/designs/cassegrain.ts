@@ -5,7 +5,9 @@ import {
   DEFAULT_REFLECTIVITY_PER_MIRROR,
   DEFAULT_TUBE_MARGIN_MM,
   CASSEGRAIN_ABERRATION_PENALTY,
+  CASSEGRAIN_BAFFLE_FACTOR,
 } from "../constants";
+import { twoMirrorLayout } from "./twoMirror";
 
 export const cassegrain: DesignGenerator = (
   spec: InputSpec,
@@ -15,29 +17,22 @@ export const cassegrain: DesignGenerator = (
   const Fp = params.primaryFRatio;
   const Fs = params.systemFRatio;
 
-  if (Fp <= 0 || Fs <= Fp) return null;
-
-  const fPrimary_mm = Fp * D_mm;
-  const fSystem_mm = Fs * D_mm;
-
-  const magnification = fSystem_mm / fPrimary_mm;
-
-  const backFocus_mm = toMm(
-    spec.constraints.minBackFocus,
-    spec.constraints.backFocusUnits,
-  );
+  const layout = twoMirrorLayout(spec, D_mm, Fp, Fs);
+  if (!layout) return null;
 
   const tubeLength_mm =
-    fPrimary_mm * (1 - 1 / magnification) +
-    backFocus_mm +
+    layout.fPrimary_mm * (1 - 1 / layout.magnification) +
+    layout.backFocus_mm +
     DEFAULT_TUBE_MARGIN_MM;
 
-  const secondaryDiameter_mm = D_mm * Math.sqrt(1 / magnification);
+  const secondaryDiameter_mm = layout.secondaryDiameter_mm;
+  const obstructionDiameter_mm =
+    secondaryDiameter_mm * CASSEGRAIN_BAFFLE_FACTOR;
 
-  const obstructionRatio = secondaryDiameter_mm / D_mm;
+  const obstructionRatio = obstructionDiameter_mm / D_mm;
 
   const primaryArea_mm2 = areaCircle(D_mm);
-  const obstructionArea_mm2 = areaCircle(secondaryDiameter_mm);
+  const obstructionArea_mm2 = areaCircle(obstructionDiameter_mm);
 
   const mirrorCount = 2;
   const transmissionFactor = Math.pow(
@@ -47,7 +42,6 @@ export const cassegrain: DesignGenerator = (
 
   const effectiveArea_mm2 =
     (primaryArea_mm2 - obstructionArea_mm2) * transmissionFactor;
-
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
   const proxyScore = CASSEGRAIN_ABERRATION_PENALTY * (Fs / Fp);
@@ -59,13 +53,13 @@ export const cassegrain: DesignGenerator = (
       aperture_mm: D_mm,
       primaryFRatio: Fp,
       systemFRatio: Fs,
-      primaryFocalLength_mm: fPrimary_mm,
-      systemFocalLength_mm: fSystem_mm,
+      primaryFocalLength_mm: layout.fPrimary_mm,
+      systemFocalLength_mm: layout.fSystem_mm,
     },
     geometry: {
       tubeLength_mm,
-      backFocus_mm,
-      secondaryDiameter_mm,
+      backFocus_mm: layout.backFocus_mm,
+      secondaryDiameter_mm: obstructionDiameter_mm,
       obstructionRatio,
     },
     throughput: {
@@ -84,12 +78,7 @@ export const cassegrain: DesignGenerator = (
     },
     score: {
       total: 0,
-      terms: {
-        usableLight: 0,
-        aberration: 0,
-        tubeLength: 0,
-        obstruction: 0,
-      },
+      terms: { usableLight: 0, aberration: 0, tubeLength: 0, obstruction: 0 },
     },
   };
 };

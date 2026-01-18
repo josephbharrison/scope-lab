@@ -14,6 +14,7 @@ import { TopNField } from './components/TopNField';
 import { SpecEditor } from './components/SpecEditor';
 import { SweepEditor } from './components/SweepEditor';
 import { ResultsPanel } from './components/ResultsPanel';
+import { Export } from './components/Export';
 
 export default function LabPage() {
   const initial = defaultLabState();
@@ -72,13 +73,17 @@ export default function LabPage() {
               setPresetIdAction={loadPresetAction}
             />
             <TopNField value={topN} setTopNAction={setTopNAction} />
-            <div className='flex gap-2'>
+            <div className='flex items-center gap-2'>
               <button
                 className='rounded-lg bg-zinc-900 px-4 py-2 text-sm font-medium text-white'
                 onClick={runAction}
               >
                 Run sweep
               </button>
+              <Export
+                result={result}
+                tubeUnits={spec.constraints.tubeLengthUnits}
+              />
             </div>
           </div>
         </section>
