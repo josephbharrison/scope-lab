@@ -1,27 +1,19 @@
 import type { Candidate, ScoreBreakdown, WeightSpec } from "./types";
-
 import { OBSTRUCTION_CONTRAST_COEFFICIENT } from "./constants";
 
-/*
-  Normalize a value into [0, 1] given min/max bounds.
-  Values outside the range are clamped.
-*/
-function normalize(value: number, min: number, max: number): number {
-  if (max <= min) return 1;
-  if (value <= min) return 1;
-  if (value >= max) return 0;
-  return 1 - (value - min) / (max - min);
+function clamp01(v: number): number {
+  if (!Number.isFinite(v)) return 0;
+  if (v <= 0) return 0;
+  if (v >= 1) return 1;
+  return v;
 }
 
-/*
-  Score a single candidate given global bounds and weights.
+function inv1p(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  if (x <= 0) return 1;
+  return 1 / (1 + x);
+}
 
-  This function assumes:
-  - lower aberration proxy is better
-  - shorter tube length is better
-  - lower obstruction ratio is better
-  - higher usable light efficiency is better
-*/
 export function scoreCandidate(
   candidate: Candidate,
   bounds: {
@@ -34,27 +26,20 @@ export function scoreCandidate(
 ): Candidate {
   const { geometry, throughput, aberrations } = candidate;
 
-  const usableLightTerm = throughput.usableLightEfficiency;
+  const usableLightTerm = clamp01(throughput.usableLightEfficiency);
 
-  const tubeLengthTerm = normalize(
-    geometry.tubeLength_mm,
-    bounds.minTubeLength,
-    bounds.maxTubeLength,
-  );
+  const aberrScale =
+    Number.isFinite(bounds.maxAberration) && bounds.maxAberration > 0
+      ? bounds.maxAberration
+      : 1;
 
-  const aberrationTerm = normalize(
-    aberrations.proxyScore,
-    bounds.minAberration,
-    bounds.maxAberration,
-  );
+  const aberrationTerm = clamp01(inv1p(aberrations.proxyScore / aberrScale));
 
-  const obstructionPenalty =
-    geometry.obstructionRatio +
-    OBSTRUCTION_CONTRAST_COEFFICIENT *
-    geometry.obstructionRatio *
-    geometry.obstructionRatio;
+  const o = clamp01(geometry.obstructionRatio);
+  const obstructionPenalty = o + OBSTRUCTION_CONTRAST_COEFFICIENT * o * o;
+  const obstructionTerm = clamp01(1 - obstructionPenalty);
 
-  const obstructionTerm = 1 - obstructionPenalty;
+  const tubeLengthTerm = 1;
 
   const terms: ScoreBreakdown = {
     usableLight: usableLightTerm,
@@ -66,7 +51,6 @@ export function scoreCandidate(
   const total =
     weights.usableLight * terms.usableLight +
     weights.aberration * terms.aberration +
-    weights.tubeLength * terms.tubeLength +
     weights.obstruction * terms.obstruction;
 
   return {
@@ -78,31 +62,25 @@ export function scoreCandidate(
   };
 }
 
-/*
-  Compute global bounds needed for normalization across a sweep.
-*/
 export function computeScoreBounds(candidates: Candidate[]): {
   minTubeLength: number;
   maxTubeLength: number;
   minAberration: number;
   maxAberration: number;
 } {
-  let minTubeLength = Infinity;
-  let maxTubeLength = -Infinity;
-  let minAberration = Infinity;
-  let maxAberration = -Infinity;
+  let maxAberration = 0;
 
   for (const c of candidates) {
-    minTubeLength = Math.min(minTubeLength, c.geometry.tubeLength_mm);
-    maxTubeLength = Math.max(maxTubeLength, c.geometry.tubeLength_mm);
-    minAberration = Math.min(minAberration, c.aberrations.proxyScore);
-    maxAberration = Math.max(maxAberration, c.aberrations.proxyScore);
+    const ab = c.aberrations.proxyScore;
+    if (Number.isFinite(ab) && ab > maxAberration) maxAberration = ab;
   }
 
+  if (!(maxAberration > 0)) maxAberration = 1;
+
   return {
-    minTubeLength,
-    maxTubeLength,
-    minAberration,
+    minTubeLength: 0,
+    maxTubeLength: 1,
+    minAberration: 0,
     maxAberration,
   };
 }

@@ -122,7 +122,6 @@ function ensureFeasibleSpec(spec: InputSpec): {
   warnings: string[];
 } {
   const warnings: string[] = [];
-
   let next: InputSpec = spec;
 
   const primaryStep = clampFinite(next.sweep.primaryFRatioStep, 0.25);
@@ -306,47 +305,62 @@ export default function LabPage() {
     return found ? found.id : '';
   }, [spec]);
 
-  function applySpec(next: InputSpec, extraWarnings: string[] = []) {
+  function runAndSync(
+    nextSpec: InputSpec,
+    nextTopN: number
+  ): {
+    spec: InputSpec;
+    warnings: string[];
+    result: SweepResult;
+  } {
+    const withLimits0 = inferDerivedLimits(nextSpec);
+    const tuned0 = ensureFeasibleSpec(withLimits0);
+
+    const sweep0 = runSweep(tuned0.spec, nextTopN);
+    const sweepWarnings0 = Array.isArray(sweep0.warnings)
+      ? sweep0.warnings
+      : [];
+
+    const applied0 = sweep0.appliedSpec ?? tuned0.spec;
+    const withLimits1 = sweep0.derivedSpec ?? inferDerivedLimits(applied0);
+    const tuned1 = ensureFeasibleSpec(withLimits1);
+
+    const combined = mergeWarnings(tuned1.warnings, sweepWarnings0);
+
+    if (JSON.stringify(tuned1.spec) !== JSON.stringify(tuned0.spec)) {
+      const sweep1 = runSweep(tuned1.spec, nextTopN);
+      const sweepWarnings1 = Array.isArray(sweep1.warnings)
+        ? sweep1.warnings
+        : [];
+      return {
+        spec: tuned1.spec,
+        warnings: mergeWarnings(tuned1.warnings, sweepWarnings1),
+        result: sweep1,
+      };
+    }
+
+    return {
+      spec: tuned1.spec,
+      warnings: combined,
+      result: sweep0,
+    };
+  }
+
+  function applySpec(next: InputSpec) {
     const withLimits = inferDerivedLimits(next);
     const tuned = ensureFeasibleSpec(withLimits);
     setSpec(structuredClone(tuned.spec));
-    setWarnings(mergeWarnings(tuned.warnings, extraWarnings));
+    setWarnings(tuned.warnings);
     return tuned;
   }
 
   function runAction() {
-    const withLimits = inferDerivedLimits(spec);
-    const tuned0 = ensureFeasibleSpec(withLimits);
-
-    if (JSON.stringify(tuned0.spec) !== JSON.stringify(spec)) {
-      setSpec(structuredClone(tuned0.spec));
+    const out = runAndSync(spec, topN);
+    if (JSON.stringify(out.spec) !== JSON.stringify(spec)) {
+      setSpec(structuredClone(out.spec));
     }
-
-    const next = runSweep(tuned0.spec, topN);
-
-    const sweepWarnings = Array.isArray(next.warnings) ? next.warnings : [];
-    const combined0 = mergeWarnings(tuned0.warnings, sweepWarnings);
-
-    const applied =
-      (next as SweepResult & { appliedSpec?: InputSpec }).appliedSpec ??
-      tuned0.spec;
-
-    const derived0 = next.derivedSpec ?? applied;
-    const derived1 = inferDerivedLimits(derived0);
-    const tuned1 = ensureFeasibleSpec(derived1);
-
-    const combined1 = mergeWarnings(tuned1.warnings, sweepWarnings);
-
-    if (JSON.stringify(tuned1.spec) !== JSON.stringify(tuned0.spec)) {
-      setSpec(structuredClone(tuned1.spec));
-      setWarnings(combined1);
-      const rerun = runSweep(tuned1.spec, topN);
-      setResult(structuredClone(rerun));
-      return;
-    }
-
-    setWarnings(combined0);
-    setResult(structuredClone(next));
+    setWarnings(out.warnings);
+    setResult(structuredClone(out.result));
   }
 
   function setSyncModeAction(nextMode: SyncMode) {
@@ -365,20 +379,18 @@ export default function LabPage() {
 
   function setSpecFromDesign(next: InputSpec) {
     const reconciled = reconcileFromDesign(next);
-    const tuned = applySpec(reconciled);
-    const r = runSweep(tuned.spec, topN);
-    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
-    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
-    setResult(structuredClone(r));
+    const out = runAndSync(reconciled, topN);
+    setSpec(structuredClone(out.spec));
+    setWarnings(out.warnings);
+    setResult(structuredClone(out.result));
   }
 
   function setSpecFromSweep(next: InputSpec) {
     const reconciled = reconcileFromSweep(next);
-    const tuned = applySpec(reconciled);
-    const r = runSweep(tuned.spec, topN);
-    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
-    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
-    setResult(structuredClone(r));
+    const out = runAndSync(reconciled, topN);
+    setSpec(structuredClone(out.spec));
+    setWarnings(out.warnings);
+    setResult(structuredClone(out.result));
   }
 
   function loadPresetAction(id: string) {
@@ -388,22 +400,20 @@ export default function LabPage() {
     setLoadedSpecFilename('');
 
     const nextSpec = reconcile(structuredClone(p.spec), syncMode);
-    const tuned = applySpec(nextSpec);
-    const r = runSweep(tuned.spec, topN);
-    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
-    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
-    setResult(structuredClone(r));
+    const out = runAndSync(nextSpec, topN);
+    setSpec(structuredClone(out.spec));
+    setWarnings(out.warnings);
+    setResult(structuredClone(out.result));
   }
 
   function loadSpecAction(nextSpec: InputSpec, nextTopN: number) {
     setTopN(nextTopN);
 
     const reconciled = reconcile(structuredClone(nextSpec), syncMode);
-    const tuned = applySpec(reconciled);
-    const r = runSweep(tuned.spec, nextTopN);
-    const sweepWarnings = Array.isArray(r.warnings) ? r.warnings : [];
-    setWarnings(mergeWarnings(tuned.warnings, sweepWarnings));
-    setResult(structuredClone(r));
+    const out = runAndSync(reconciled, nextTopN);
+    setSpec(structuredClone(out.spec));
+    setWarnings(out.warnings);
+    setResult(structuredClone(out.result));
   }
 
   function setTopNAction(next: number) {
@@ -469,19 +479,6 @@ export default function LabPage() {
           </div>
         </section>
 
-        {warnings.length > 0 ? (
-          <section className='rounded-xl border border-amber-200 bg-amber-50 p-4'>
-            <div className='text-sm font-medium text-amber-900'>
-              Auto-tuned constraints
-            </div>
-            <ul className='mt-2 list-disc pl-5 text-sm text-amber-900'>
-              {warnings.map((w, i) => (
-                <li key={`${i}-${w}`}>{w}</li>
-              ))}
-            </ul>
-          </section>
-        ) : null}
-
         <section className='grid grid-cols-1 gap-6 lg:grid-cols-2'>
           <div
             className={[
@@ -544,6 +541,19 @@ export default function LabPage() {
               disabled={!sweepEditable}
             />
           </div>
+
+          {warnings.length > 0 ? (
+            <div className='rounded-xl border border-amber-200 bg-amber-50 p-4 lg:col-span-2'>
+              <div className='text-sm font-medium text-amber-900'>
+                Auto-tuned constraints
+              </div>
+              <ul className='mt-2 list-disc pl-5 text-sm text-amber-900'>
+                {warnings.map((w, i) => (
+                  <li key={`${i}-${w}`}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
           <div className='rounded-xl border border-zinc-200 bg-white p-5 lg:col-span-2'>
             <ResultsPanel
