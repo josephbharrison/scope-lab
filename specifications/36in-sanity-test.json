@@ -1,0 +1,39 @@
+{
+  "id": "36in-sanity-pass",
+  "label": "36-inch Sanity Pass",
+  "description": "Constraint-relaxed spec to confirm raytrace + scoring pipeline is functioning",
+  "topN": 25,
+  "spec": {
+    "aperture": 36,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 10,
+    "designKinds": ["rc", "sct", "cassegrain"],
+    "constraints": {
+      "maxTubeLength": 110,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 0.5,
+      "minBackFocus": 120,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 15,
+      "fieldUnits": "mm"
+    },
+    "coatings": {
+      "reflectivityPerMirror": 0.92,
+      "correctorTransmission": 0.9
+    },
+    "sweep": {
+      "primaryFRatioMin": 2.5,
+      "primaryFRatioMax": 4.0,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 10,
+      "systemFRatioMax": 14,
+      "systemFRatioStep": 1
+    },
+    "weights": {
+      "usableLight": 0.30,
+      "aberration": 0.30,
+      "tubeLength": 0.20,
+      "obstruction": 0.20
+    }
+  }
+}

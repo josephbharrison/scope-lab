@@ -1,0 +1,39 @@
+{
+  "id": "36in-aberration-stress-test",
+  "label": "36-inch Aberration Stress Test",
+  "description": "Wide-field stress case to force meaningful ray divergence and expose aberration differences between designs",
+  "topN": 25,
+  "spec": {
+    "aperture": 36,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 10,
+    "designKinds": ["rc", "sct", "cassegrain"],
+    "constraints": {
+      "maxTubeLength": 84,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 0.35,
+      "minBackFocus": 200,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 30,
+      "fieldUnits": "mm"
+    },
+    "coatings": {
+      "reflectivityPerMirror": 0.92,
+      "correctorTransmission": 0.9
+    },
+    "sweep": {
+      "primaryFRatioMin": 2.0,
+      "primaryFRatioMax": 3.5,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 8,
+      "systemFRatioMax": 14,
+      "systemFRatioStep": 1
+    },
+    "weights": {
+      "usableLight": 0.25,
+      "aberration": 0.45,
+      "tubeLength": 0.15,
+      "obstruction": 0.15
+    }
+  }
+}

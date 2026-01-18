@@ -1,6 +1,3 @@
-/*
-  Shared numerical defaults and coefficients for scope-lab optics engine.
-*/
 export const TARGET_FRATIO_MISMATCH_COEFFICIENT = 0.35;
 export const DEFAULT_REFLECTIVITY_PER_MIRROR = 0.9;
 export const DEFAULT_CORRECTOR_TRANSMISSION = 0.9;
@@ -20,3 +17,18 @@ export const OBSTRUCTION_CONTRAST_COEFFICIENT = 0.15;
 export const CASSEGRAIN_BAFFLE_FACTOR = 1.06;
 export const RC_BAFFLE_FACTOR = 1.14;
 export const SCT_BAFFLE_FACTOR = 1.22;
+
+export const CASS_COMA_COEFF = 0.6;
+export const CASS_ASTIG_COEFF = 0.35;
+export const CASS_FIELD_CURV_COEFF = 0.35;
+export const CASS_SPHERICAL_COEFF = 0.02;
+
+export const RC_COMA_COEFF = 0.02;
+export const RC_ASTIG_COEFF = 0.6;
+export const RC_FIELD_CURV_COEFF = 0.35;
+export const RC_SPHERICAL_COEFF = 0.02;
+
+export const SCT_COMA_COEFF = 0.25;
+export const SCT_ASTIG_COEFF = 0.35;
+export const SCT_FIELD_CURV_COEFF = 0.55;
+export const SCT_SPHERICAL_COEFF = 0.02;

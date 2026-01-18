@@ -1,3 +1,4 @@
+// src/optics/types.ts
 export type OpticDesignKind = "newtonian" | "cassegrain" | "sct" | "rc";
 
 export type Units = "mm" | "inch";
@@ -31,7 +32,6 @@ export type SweepSpec = {
 export type WeightSpec = {
   usableLight: number;
   aberration: number;
-  tubeLength: number;
   obstruction: number;
 };
 
@@ -74,14 +74,19 @@ export type ThroughputMetrics = {
   transmissionFactor: number;
 };
 
-export type AberrationMetrics = {
-  proxyScore: number;
+export type ImageQualityMetrics = {
+  fieldAngle_rad: number;
+  coma_wfeRms_waves_edge: number;
+  astig_wfeRms_waves_edge: number;
+  fieldCurvature_wfeRms_waves_edge: number;
+  spherical_wfeRms_waves_edge: number;
+  wfeRms_waves_edge: number;
+  strehl: number;
 };
 
 export type ScoreBreakdown = {
   usableLight: number;
   aberration: number;
-  tubeLength: number;
   obstruction: number;
 };
 
@@ -107,7 +112,7 @@ export type Candidate = {
   };
   geometry: GeometryMetrics;
   throughput: ThroughputMetrics;
-  aberrations: AberrationMetrics;
+  aberrations: ImageQualityMetrics;
   constraints: ConstraintResult;
   score: ScoreResult;
 };

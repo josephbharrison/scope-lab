@@ -1,6 +1,7 @@
+// src/optics/sweep.ts
 import type { Candidate, InputSpec, OpticDesignKind, Units } from "./types";
 
-import { toMm, fromMm } from "./units";
+import { toMm } from "./units";
 import { computeScoreBounds, scoreCandidate } from "./score";
 
 import { newtonian } from "./designs/newtonian";
@@ -32,32 +33,39 @@ function checkConstraints(spec: InputSpec, c: Candidate): Candidate {
     spec.constraints.backFocusUnits,
   );
 
-  if (c.geometry.tubeLength_mm > maxTube_mm) {
+  if (Number.isFinite(maxTube_mm) && c.geometry.tubeLength_mm > maxTube_mm) {
     reasons.push("tube_length_exceeds_max");
   }
 
-  if (c.geometry.obstructionRatio > spec.constraints.maxObstructionRatio) {
+  if (
+    Number.isFinite(spec.constraints.maxObstructionRatio) &&
+    c.geometry.obstructionRatio > spec.constraints.maxObstructionRatio
+  ) {
     reasons.push("obstruction_exceeds_max");
   }
 
-  if (c.geometry.backFocus_mm < minBackFocus_mm) {
+  if (
+    Number.isFinite(minBackFocus_mm) &&
+    minBackFocus_mm > 0 &&
+    c.geometry.backFocus_mm < minBackFocus_mm
+  ) {
     reasons.push("backfocus_below_min");
   }
-
-  const pass = reasons.length === 0;
 
   return {
     ...c,
     constraints: {
-      pass,
+      pass: reasons.length === 0,
       reasons,
     },
   };
 }
 
 function enumerateRange(min: number, max: number, step: number): number[] {
-  if (step <= 0) return [];
+  if (!Number.isFinite(step) || step <= 0) return [];
+  if (!Number.isFinite(min) || !Number.isFinite(max)) return [];
   if (max < min) return [];
+
   const out: number[] = [];
   let v = min;
   while (v <= max + 1e-12) {
@@ -80,9 +88,9 @@ function relaxedSpecForInference(spec: InputSpec): InputSpec {
     ...spec,
     constraints: {
       ...spec.constraints,
-      maxTubeLength: 1e9,
+      maxTubeLength: 1e12,
       maxObstructionRatio: 1,
-      minBackFocus: 0,
+      minBackFocus: spec.constraints.minBackFocus,
     },
   };
 }
@@ -106,10 +114,12 @@ function collectRawCandidates(spec: InputSpec): Candidate[] {
     spec.sweep.systemFRatioStep,
   );
 
-  const fsFallback =
-    spec.targetSystemFRatio > 0 ? [spec.targetSystemFRatio] : [];
-
-  const fsValues = rawFsValues.length > 0 ? rawFsValues : fsFallback;
+  const fsValues =
+    rawFsValues.length > 0 && rawFsValues.some(Number.isFinite)
+      ? rawFsValues
+      : spec.targetSystemFRatio > 0
+        ? [spec.targetSystemFRatio]
+        : [];
 
   for (const kind of spec.designKinds) {
     const gen = generatorFor(kind);
@@ -118,15 +128,13 @@ function collectRawCandidates(spec: InputSpec): Candidate[] {
     for (const Fp of fpValues) {
       if (kind === "newtonian") {
         const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fp });
-        if (!c) continue;
-        out.push(c);
+        if (c) out.push(c);
         continue;
       }
 
       for (const Fs of fsValues) {
         const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fs });
-        if (!c) continue;
-        out.push(c);
+        if (c) out.push(c);
       }
     }
   }
@@ -134,154 +142,24 @@ function collectRawCandidates(spec: InputSpec): Candidate[] {
   return out;
 }
 
-function inferConstraintAdjustments(spec: InputSpec): {
-  spec: InputSpec;
-  warnings: string[];
-} {
+export function inferDerivedLimits(spec: InputSpec): InputSpec {
   const relaxed = relaxedSpecForInference(spec);
   const raw = collectRawCandidates(relaxed);
-
-  if (raw.length === 0) {
-    return { spec, warnings: [] };
-  }
-
-  let minTube_mm = Infinity;
-  let minObs = Infinity;
-  let maxBackFocus_mm = -Infinity;
-
-  for (const c of raw) {
-    if (Number.isFinite(c.geometry.tubeLength_mm)) {
-      minTube_mm = Math.min(minTube_mm, c.geometry.tubeLength_mm);
-    }
-    if (Number.isFinite(c.geometry.obstructionRatio)) {
-      minObs = Math.min(minObs, c.geometry.obstructionRatio);
-    }
-    if (Number.isFinite(c.geometry.backFocus_mm)) {
-      maxBackFocus_mm = Math.max(maxBackFocus_mm, c.geometry.backFocus_mm);
-    }
-  }
-
-  if (
-    !Number.isFinite(minTube_mm) ||
-    !Number.isFinite(minObs) ||
-    !Number.isFinite(maxBackFocus_mm)
-  ) {
-    return { spec, warnings: [] };
-  }
-
-  const warnings: string[] = [];
-  let next = spec;
-
-  const curMaxTube_mm = toMm(
-    spec.constraints.maxTubeLength,
-    spec.constraints.tubeLengthUnits,
-  );
-
-  if (curMaxTube_mm < minTube_mm) {
-    const v = fromMm(minTube_mm, spec.constraints.tubeLengthUnits);
-    next = {
-      ...next,
-      constraints: {
-        ...next.constraints,
-        maxTubeLength: v,
-      },
-    };
-    warnings.push(
-      `Max tube length increased to ${v.toFixed(2)} ${formatUnits(spec.constraints.tubeLengthUnits)} (minimum feasible)`,
-    );
-  }
-
-  if (spec.constraints.maxObstructionRatio < minObs) {
-    next = {
-      ...next,
-      constraints: {
-        ...next.constraints,
-        maxObstructionRatio: minObs,
-      },
-    };
-    warnings.push(
-      `Max obstruction ratio increased to ${minObs.toFixed(3)} (minimum feasible)`,
-    );
-  }
-
-  const curMinBackFocus_mm = toMm(
-    spec.constraints.minBackFocus,
-    spec.constraints.backFocusUnits,
-  );
-
-  if (curMinBackFocus_mm > maxBackFocus_mm) {
-    const v = fromMm(maxBackFocus_mm, spec.constraints.backFocusUnits);
-    next = {
-      ...next,
-      constraints: {
-        ...next.constraints,
-        minBackFocus: v,
-      },
-    };
-    warnings.push(
-      `Min backfocus reduced to ${v.toFixed(2)} ${formatUnits(spec.constraints.backFocusUnits)} (maximum feasible)`,
-    );
-  }
-
-  return { spec: next, warnings };
-}
-
-export function inferDerivedLimits(spec: InputSpec): InputSpec {
-  const fpValues = enumerateRange(
-    spec.sweep.primaryFRatioMin,
-    spec.sweep.primaryFRatioMax,
-    spec.sweep.primaryFRatioStep,
-  );
-
-  const rawFsValues = enumerateRange(
-    spec.sweep.systemFRatioMin,
-    spec.sweep.systemFRatioMax,
-    spec.sweep.systemFRatioStep,
-  );
-
-  const fsFallback =
-    spec.targetSystemFRatio > 0 ? [spec.targetSystemFRatio] : [];
-
-  const fsValues = rawFsValues.length > 0 ? rawFsValues : fsFallback;
-
-  const relaxed = relaxedSpecForInference(spec);
 
   let minFp = Infinity;
   let maxFp = -Infinity;
   let minFs = Infinity;
   let maxFs = -Infinity;
 
-  for (const kind of spec.designKinds) {
-    const gen = generatorFor(kind);
-    if (!gen) continue;
-
-    for (const Fp of fpValues) {
-      if (kind === "newtonian") {
-        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fp });
-        if (!raw) continue;
-
-        const c = checkConstraints(spec, raw);
-        if (!c.constraints.pass) continue;
-
-        minFp = Math.min(minFp, Fp);
-        maxFp = Math.max(maxFp, Fp);
-        minFs = Math.min(minFs, Fp);
-        maxFs = Math.max(maxFs, Fp);
-        continue;
-      }
-
-      for (const Fs of fsValues) {
-        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fs });
-        if (!raw) continue;
-
-        const c = checkConstraints(spec, raw);
-        if (!c.constraints.pass) continue;
-
-        minFp = Math.min(minFp, Fp);
-        maxFp = Math.max(maxFp, Fp);
-        minFs = Math.min(minFs, Fs);
-        maxFs = Math.max(maxFs, Fs);
-      }
+  for (const c of raw) {
+    const { primaryFRatio, systemFRatio } = c.inputs;
+    if (Number.isFinite(primaryFRatio)) {
+      minFp = Math.min(minFp, primaryFRatio);
+      maxFp = Math.max(maxFp, primaryFRatio);
+    }
+    if (Number.isFinite(systemFRatio)) {
+      minFs = Math.min(minFs, systemFRatio);
+      maxFs = Math.max(maxFs, systemFRatio);
     }
   }
 
@@ -291,10 +169,7 @@ export function inferDerivedLimits(spec: InputSpec): InputSpec {
     !Number.isFinite(minFs) ||
     !Number.isFinite(maxFs)
   ) {
-    return {
-      ...spec,
-      derivedLimits: undefined,
-    };
+    return { ...spec, derivedLimits: undefined };
   }
 
   return {
@@ -318,6 +193,7 @@ function computeSweep(
   top: Candidate[];
 } {
   const candidates: Candidate[] = [];
+  const relaxed = relaxedSpecForInference(spec);
 
   const fpValues = enumerateRange(
     spec.sweep.primaryFRatioMin,
@@ -331,12 +207,12 @@ function computeSweep(
     spec.sweep.systemFRatioStep,
   );
 
-  const fsFallback =
-    spec.targetSystemFRatio > 0 ? [spec.targetSystemFRatio] : [];
-
-  const fsValues = rawFsValues.length > 0 ? rawFsValues : fsFallback;
-
-  const relaxed = relaxedSpecForInference(spec);
+  const fsValues =
+    rawFsValues.length > 0 && rawFsValues.some(Number.isFinite)
+      ? rawFsValues
+      : spec.targetSystemFRatio > 0
+        ? [spec.targetSystemFRatio]
+        : [];
 
   for (const kind of spec.designKinds) {
     const gen = generatorFor(kind);
@@ -345,15 +221,13 @@ function computeSweep(
     for (const Fp of fpValues) {
       if (kind === "newtonian") {
         const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fp });
-        if (!raw) continue;
-        candidates.push(checkConstraints(spec, raw));
+        if (raw) candidates.push(checkConstraints(spec, raw));
         continue;
       }
 
       for (const Fs of fsValues) {
         const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fs });
-        if (!raw) continue;
-        candidates.push(checkConstraints(spec, raw));
+        if (raw) candidates.push(checkConstraints(spec, raw));
       }
     }
   }
@@ -379,38 +253,27 @@ function computeSweep(
   }
 
   const bounds = computeScoreBounds(passing);
-  const scored = passing.map((c) => scoreCandidate(c, bounds, spec.weights));
+  const ranked = passing
+    .map((c) => scoreCandidate(c, bounds, spec.weights))
+    .sort((a, b) => b.score.total - a.score.total);
 
-  scored.sort((a, b) => b.score.total - a.score.total);
-
-  for (const c of scored) {
+  for (const c of ranked) {
     if (!bestByKind[c.kind]) bestByKind[c.kind] = c;
   }
-
-  const bestOverall = scored[0] ?? null;
-  const top = scored.slice(0, Math.max(0, topN));
 
   return {
     candidates,
     passing,
-    ranked: scored,
+    ranked,
     bestByKind,
-    bestOverall,
-    top,
+    bestOverall: ranked[0] ?? null,
+    top: ranked.slice(0, Math.max(0, topN)),
   };
 }
 
 export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
-  const adj = inferConstraintAdjustments(spec);
-  const baseSpec = adj.spec;
-  const warnings = adj.warnings;
-
-  const appliedSpec =
-    JSON.stringify(baseSpec) !== JSON.stringify(spec) ? baseSpec : undefined;
-
-  const first = computeSweep(baseSpec, topN);
-
-  const derivedSpec = inferDerivedLimits(baseSpec);
+  const first = computeSweep(spec, topN);
+  const derivedSpec = inferDerivedLimits(spec);
 
   if (first.passing.length > 0) {
     return {
@@ -420,26 +283,7 @@ export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
       bestByKind: first.bestByKind,
       top: first.top,
       derivedSpec,
-      warnings,
-      appliedSpec,
-    };
-  }
-
-  if (
-    warnings.length > 0 &&
-    JSON.stringify(baseSpec) !== JSON.stringify(spec)
-  ) {
-    const second = computeSweep(baseSpec, topN);
-
-    return {
-      candidates: second.candidates,
-      ranked: second.ranked,
-      bestOverall: second.bestOverall,
-      bestByKind: second.bestByKind,
-      top: second.top,
-      derivedSpec,
-      warnings,
-      appliedSpec,
+      warnings: [],
     };
   }
 
@@ -450,7 +294,6 @@ export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
     bestByKind: first.bestByKind,
     top: [],
     derivedSpec,
-    warnings,
-    appliedSpec,
+    warnings: [],
   };
 }

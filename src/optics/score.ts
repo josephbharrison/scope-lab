@@ -1,3 +1,4 @@
+// src/optics/score.ts
 import type { Candidate, ScoreBreakdown, WeightSpec } from "./types";
 import { OBSTRUCTION_CONTRAST_COEFFICIENT } from "./constants";
 
@@ -8,19 +9,16 @@ function clamp01(v: number): number {
   return v;
 }
 
-function inv1p(x: number): number {
-  if (!Number.isFinite(x)) return 0;
-  if (x <= 0) return 1;
-  return 1 / (1 + x);
+function finiteOr(v: number, fallback: number): number {
+  return Number.isFinite(v) ? v : fallback;
 }
 
 export function scoreCandidate(
   candidate: Candidate,
   bounds: {
-    minTubeLength: number;
-    maxTubeLength: number;
-    minAberration: number;
-    maxAberration: number;
+    minWfeRms: number;
+    maxWfeRms: number;
+    wfeScale: number;
   },
   weights: WeightSpec,
 ): Candidate {
@@ -28,23 +26,21 @@ export function scoreCandidate(
 
   const usableLightTerm = clamp01(throughput.usableLightEfficiency);
 
-  const aberrScale =
-    Number.isFinite(bounds.maxAberration) && bounds.maxAberration > 0
-      ? bounds.maxAberration
-      : 1;
+  const w = finiteOr(aberrations.wfeRms_waves_edge, NaN);
+  const minW = finiteOr(bounds.minWfeRms, 0);
+  const maxW = finiteOr(bounds.maxWfeRms, minW + 1);
 
-  const aberrationTerm = clamp01(inv1p(aberrations.proxyScore / aberrScale));
+  const denom = Math.max(1e-12, maxW - minW);
+  const normBad = Number.isFinite(w) ? clamp01((w - minW) / denom) : 1;
+  const aberrationTerm = clamp01(1 - normBad);
 
   const o = clamp01(geometry.obstructionRatio);
   const obstructionPenalty = o + OBSTRUCTION_CONTRAST_COEFFICIENT * o * o;
   const obstructionTerm = clamp01(1 - obstructionPenalty);
 
-  const tubeLengthTerm = 1;
-
   const terms: ScoreBreakdown = {
     usableLight: usableLightTerm,
     aberration: aberrationTerm,
-    tubeLength: tubeLengthTerm,
     obstruction: obstructionTerm,
   };
 
@@ -63,24 +59,26 @@ export function scoreCandidate(
 }
 
 export function computeScoreBounds(candidates: Candidate[]): {
-  minTubeLength: number;
-  maxTubeLength: number;
-  minAberration: number;
-  maxAberration: number;
+  minWfeRms: number;
+  maxWfeRms: number;
+  wfeScale: number;
 } {
-  let maxAberration = 0;
+  let min = Infinity;
+  let max = -Infinity;
 
   for (const c of candidates) {
-    const ab = c.aberrations.proxyScore;
-    if (Number.isFinite(ab) && ab > maxAberration) maxAberration = ab;
+    const w = c.aberrations.wfeRms_waves_edge;
+    if (!Number.isFinite(w)) continue;
+    if (w < min) min = w;
+    if (w > max) max = w;
   }
 
-  if (!(maxAberration > 0)) maxAberration = 1;
+  if (!Number.isFinite(min)) min = 0;
+  if (!Number.isFinite(max) || max <= min) max = min + 1;
 
   return {
-    minTubeLength: 0,
-    maxTubeLength: 1,
-    minAberration: 0,
-    maxAberration,
+    minWfeRms: min,
+    maxWfeRms: max,
+    wfeScale: 1,
   };
 }

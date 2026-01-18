@@ -1,3 +1,4 @@
+// src/optics/designs/twoMirror.ts
 import type { InputSpec } from "../types";
 import { toMm } from "../units";
 
@@ -12,8 +13,8 @@ export type TwoMirrorLayout = {
   chiefRayHeightAtSecondary_mm: number;
 };
 
-function clampPositiveFinite(v: number): number {
-  return Number.isFinite(v) && v > 0 ? v : 0;
+function clampNonNegativeFinite(v: number): number {
+  return Number.isFinite(v) && v >= 0 ? v : 0;
 }
 
 export function twoMirrorLayout(
@@ -22,34 +23,41 @@ export function twoMirrorLayout(
   Fp: number,
   Fs: number,
 ): TwoMirrorLayout | null {
+  if (!Number.isFinite(D_mm) || D_mm <= 0) return null;
+  if (!Number.isFinite(Fp) || !Number.isFinite(Fs)) return null;
   if (Fp <= 0 || Fs <= Fp) return null;
 
   const fPrimary_mm = Fp * D_mm;
   const fSystem_mm = Fs * D_mm;
-
   const magnification = fSystem_mm / fPrimary_mm;
+  if (!(magnification > 1)) return null;
 
-  const backFocus_mm = toMm(
-    spec.constraints.minBackFocus,
-    spec.constraints.backFocusUnits,
+  const minBackFocus_mm = clampNonNegativeFinite(
+    toMm(spec.constraints.minBackFocus, spec.constraints.backFocusUnits),
   );
-  if (backFocus_mm < 0) return null;
+
+  const backFocus_mm = minBackFocus_mm;
 
   const d = (magnification * fPrimary_mm - backFocus_mm) / (magnification + 1);
-  if (!Number.isFinite(d)) return null;
-  if (d <= 0) return null;
-  if (d >= fPrimary_mm) return null;
+  if (!Number.isFinite(d) || d <= 0 || d >= fPrimary_mm) return null;
 
-  const fieldRadius_mm = toMm(
-    spec.constraints.fullyIlluminatedFieldRadius,
-    spec.constraints.fieldUnits,
+  const fieldRadius_mm = clampNonNegativeFinite(
+    toMm(
+      spec.constraints.fullyIlluminatedFieldRadius,
+      spec.constraints.fieldUnits,
+    ),
   );
 
   const coneRadiusAtSecondary_mm = 0.5 * D_mm * (1 - d / fPrimary_mm);
+  if (
+    !Number.isFinite(coneRadiusAtSecondary_mm) ||
+    coneRadiusAtSecondary_mm <= 0
+  ) {
+    return null;
+  }
 
-  const y = clampPositiveFinite(fieldRadius_mm);
   const chiefRayHeightAtSecondary_mm =
-    y > 0 ? (y * (backFocus_mm + d)) / fSystem_mm : 0;
+    fieldRadius_mm > 0 ? (fieldRadius_mm * (backFocus_mm + d)) / fSystem_mm : 0;
 
   const secondaryDiameter_mm =
     2 * (coneRadiusAtSecondary_mm + chiefRayHeightAtSecondary_mm);

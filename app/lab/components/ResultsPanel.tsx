@@ -1,3 +1,4 @@
+// app/lab/components/ResultsPanel.ts
 'use client';
 
 import type {
