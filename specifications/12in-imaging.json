@@ -1,0 +1,31 @@
+{
+  "id": "12in-imaging",
+  "label": "12-inch Imaging (feasible)",
+  "description": "Rear-focus designs, obstruction cap aligned with Fs/Fp sweep",
+  "topN": 25,
+  "spec": {
+    "aperture": 12,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 8,
+    "designKinds": ["cassegrain", "rc", "sct"],
+    "constraints": {
+      "maxTubeLength": 60,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 0.45,
+      "minBackFocus": 100,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 15,
+      "fieldUnits": "mm"
+    },
+    "coatings": { "reflectivityPerMirror": 0.9, "correctorTransmission": 0.95 },
+    "sweep": {
+      "primaryFRatioMin": 2.5,
+      "primaryFRatioMax": 4,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 10,
+      "systemFRatioMax": 20,
+      "systemFRatioStep": 1
+    },
+    "weights": { "usableLight": 0.35, "aberration": 0.4, "tubeLength": 0.15, "obstruction": 0.1 }
+  }
+}
