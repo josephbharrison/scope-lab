@@ -14,6 +14,84 @@ import {
   fmtPercent,
 } from '../../../src/ui/format';
 import { TopTable } from './TopTable';
+import { ScopeLabResultsViewer } from './ScopeLabResultsView';
+
+import type {
+  NewtonianPrescription,
+  ConicSurface,
+  PlaneSurface,
+} from '../../../src/optics/raytrace/types';
+
+type ViewerCandidate = Candidate;
+
+function clampNonNegativeFinite(v: number): number {
+  return Number.isFinite(v) && v >= 0 ? v : 0;
+}
+
+function finiteOr(v: number, fallback: number): number {
+  return Number.isFinite(v) ? v : fallback;
+}
+
+function normKind(kind: unknown): string {
+  return String(kind ?? '')
+    .trim()
+    .toLowerCase();
+}
+
+function isNewtonianKind(kind: unknown): boolean {
+  const k = normKind(kind);
+  return k === 'newtonian' || k === 'newt' || k === 'newton';
+}
+
+function buildNewtonianPrescription(c: ViewerCandidate): NewtonianPrescription {
+  const D = finiteOr(c.inputs.aperture_mm, NaN);
+  const fPrimary = finiteOr(c.inputs.primaryFocalLength_mm, NaN);
+  const backFocus = finiteOr(c.geometry.backFocus_mm, NaN);
+  const secondaryDiameter = finiteOr(c.geometry.secondaryDiameter_mm, NaN);
+
+  const intercept = clampNonNegativeFinite(fPrimary - backFocus);
+
+  const primary: ConicSurface = {
+    z0: 0,
+    R: 2 * fPrimary,
+    K: -1,
+    sagSign: 1,
+    apertureRadius: 0.5 * D,
+  };
+
+  const c45 = Math.SQRT1_2;
+
+  const secondary: PlaneSurface = {
+    p0: { x: 0, y: 0, z: intercept },
+    nHat: { x: c45, y: 0, z: -c45 },
+    apertureRadius: 0.5 * secondaryDiameter,
+  };
+
+  const imagePlane: PlaneSurface = {
+    p0: { x: backFocus, y: 0, z: intercept },
+    nHat: { x: 1, y: 0, z: 0 },
+    apertureRadius: Math.max(1, 2 * clampNonNegativeFinite(D)),
+  };
+
+  return {
+    primary,
+    secondary,
+    imagePlane,
+    zStart: 5 * fPrimary,
+    pupilRadius: 0.5 * D,
+  };
+}
+
+function placeholderSvg(kind: string, id: string): string {
+  const k = kind.toUpperCase();
+  const safeId = id;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="200" viewBox="0 0 1200 200">
+  <rect x="0" y="0" width="1200" height="200" fill="white" />
+  <text x="24" y="60" font-family="monospace" font-size="20">No SVG for this candidate (currently only Newt is supported).</text>
+  <text x="24" y="100" font-family="monospace" font-size="16">${k}</text>
+  <text x="24" y="130" font-family="monospace" font-size="14">${safeId}</text>
+</svg>`;
+}
 
 export function ResultsPanel(props: {
   result: SweepResult | null;
@@ -64,6 +142,32 @@ export function ResultsPanel(props: {
 
   const bestOverall = r.bestOverall as Candidate;
   const bestByKind = r.bestByKind as Record<OpticDesignKind, Candidate | null>;
+
+  const viewerCandidates: ViewerCandidate[] = r.top;
+
+  async function loadSvgForCandidate(c: ViewerCandidate): Promise<string> {
+    if (!isNewtonianKind(c.kind)) {
+      return placeholderSvg(String(c.kind), String(c.id));
+    }
+
+    const debugSvg = await import('../../../src/optics/raytrace/debugSvg');
+
+    const pres = buildNewtonianPrescription(c);
+
+    const fieldAngle = clampNonNegativeFinite(
+      finiteOr(c.aberrations.fieldAngle_rad, 0)
+    );
+
+    const svg = debugSvg.renderNewtonianCrossSectionSvg(pres, fieldAngle, {
+      width: 1200,
+      height: 600,
+      pad: 30,
+      rays: 9,
+      conicSamples: 250,
+    });
+
+    return svg || placeholderSvg(String(c.kind), String(c.id));
+  }
 
   return (
     <div className='rounded-lg border border-zinc-200 bg-zinc-50 p-4 text-sm text-zinc-700'>
@@ -130,6 +234,17 @@ export function ResultsPanel(props: {
         <div className='rounded-lg border border-zinc-200 bg-white p-3'>
           <div className='text-xs text-zinc-500'>Top {r.top.length}</div>
           <TopTable candidates={r.top} tubeUnits={props.tubeUnits} />
+        </div>
+
+        <div className='rounded-lg border border-zinc-200 bg-white p-3'>
+          <div className='text-xs text-zinc-500'>Inspect</div>
+          <div className='mt-2'>
+            <ScopeLabResultsViewer
+              title='Scope Lab Results'
+              candidates={viewerCandidates}
+              loadSvgAction={loadSvgForCandidate}
+            />
+          </div>
         </div>
 
         <div className='text-xs text-zinc-500'>
