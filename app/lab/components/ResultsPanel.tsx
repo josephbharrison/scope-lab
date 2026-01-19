@@ -99,10 +99,6 @@ export function ResultsPanel(props: {
   const viewerCandidates: ViewerCandidate[] = r.top;
 
   async function loadSvgForCandidate(c: ViewerCandidate): Promise<string> {
-    if (!isNewtonianKind(c.kind)) {
-      return placeholderSvg(String(c.kind), String(c.id));
-    }
-
     const debugSvg = await import('../../../src/optics/raytrace/debugSvg');
 
     if (!c.plan) return placeholderSvg(String(c.kind), String(c.id));

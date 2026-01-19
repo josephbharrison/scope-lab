@@ -124,7 +124,9 @@ function sagConicUnsigned(r: number, R: number, K: number): number {
   if (inside <= 0) return NaN;
 
   const s = Math.sqrt(inside);
-  const denom = R * (1 + s);
+
+  const absR = Math.abs(R);
+  const denom = absR * (1 + s);
   if (!Number.isFinite(denom) || denom === 0) return NaN;
 
   return (r * r) / denom;
