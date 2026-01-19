@@ -32,14 +32,6 @@ export type TwoMirrorPrescription = {
   pupilRadius: number;
 };
 
-export type NewtonianPrescription = {
-  primary: ConicSurface;
-  secondary: PlaneSurface;
-  imagePlane: PlaneSurface;
-  zStart: number;
-  pupilRadius: number;
-};
-
 export type ImageQualityResult = {
   fieldAngle_rad: number;
   spotRms_mm_onAxis: number;

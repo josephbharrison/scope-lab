@@ -1,4 +1,3 @@
-// app/lab/components/ResultsPanel.ts
 'use client';
 
 import type {
@@ -7,6 +6,11 @@ import type {
   Units,
 } from '../../../src/optics/types';
 import type { SweepResult } from '../../../src/optics/sweep';
+import type {
+  OpticalSimulator,
+  SampleSpec,
+} from '../../../src/optics/plan/types';
+
 import {
   candidateLabel,
   fmtLength,
@@ -16,21 +20,7 @@ import {
 import { TopTable } from './TopTable';
 import { ScopeLabResultsViewer } from './ScopeLabResultsView';
 
-import type {
-  NewtonianPrescription,
-  ConicSurface,
-  PlaneSurface,
-} from '../../../src/optics/raytrace/types';
-
 type ViewerCandidate = Candidate;
-
-function clampNonNegativeFinite(v: number): number {
-  return Number.isFinite(v) && v >= 0 ? v : 0;
-}
-
-function finiteOr(v: number, fallback: number): number {
-  return Number.isFinite(v) ? v : fallback;
-}
 
 function normKind(kind: unknown): string {
   return String(kind ?? '')
@@ -41,45 +31,6 @@ function normKind(kind: unknown): string {
 function isNewtonianKind(kind: unknown): boolean {
   const k = normKind(kind);
   return k === 'newtonian' || k === 'newt' || k === 'newton';
-}
-
-function buildNewtonianPrescription(c: ViewerCandidate): NewtonianPrescription {
-  const D = finiteOr(c.inputs.aperture_mm, NaN);
-  const fPrimary = finiteOr(c.inputs.primaryFocalLength_mm, NaN);
-  const backFocus = finiteOr(c.geometry.backFocus_mm, NaN);
-  const secondaryDiameter = finiteOr(c.geometry.secondaryDiameter_mm, NaN);
-
-  const intercept = clampNonNegativeFinite(fPrimary - backFocus);
-
-  const primary: ConicSurface = {
-    z0: 0,
-    R: 2 * fPrimary,
-    K: -1,
-    sagSign: 1,
-    apertureRadius: 0.5 * D,
-  };
-
-  const c45 = Math.SQRT1_2;
-
-  const secondary: PlaneSurface = {
-    p0: { x: 0, y: 0, z: intercept },
-    nHat: { x: c45, y: 0, z: -c45 },
-    apertureRadius: 0.5 * secondaryDiameter,
-  };
-
-  const imagePlane: PlaneSurface = {
-    p0: { x: backFocus, y: 0, z: intercept },
-    nHat: { x: 1, y: 0, z: 0 },
-    apertureRadius: Math.max(1, 2 * clampNonNegativeFinite(D)),
-  };
-
-  return {
-    primary,
-    secondary,
-    imagePlane,
-    zStart: 5 * fPrimary,
-    pupilRadius: 0.5 * D,
-  };
 }
 
 function placeholderSvg(kind: string, id: string): string {
@@ -97,6 +48,8 @@ export function ResultsPanel(props: {
   result: SweepResult | null;
   tubeUnits: Units;
   runAction: () => void;
+  simulator: OpticalSimulator;
+  scoringSampleSpec: SampleSpec;
 }) {
   const r = props.result;
 
@@ -152,19 +105,19 @@ export function ResultsPanel(props: {
 
     const debugSvg = await import('../../../src/optics/raytrace/debugSvg');
 
-    const pres = buildNewtonianPrescription(c);
+    if (!c.plan) return placeholderSvg(String(c.kind), String(c.id));
 
-    const fieldAngle = clampNonNegativeFinite(
-      finiteOr(c.aberrations.fieldAngle_rad, 0)
+    const svg = debugSvg.renderPlanCrossSectionSvg(
+      c.plan,
+      props.simulator,
+      props.scoringSampleSpec,
+      {
+        width: 1200,
+        height: 600,
+        pad: 30,
+        surfaceSamples: 250,
+      }
     );
-
-    const svg = debugSvg.renderNewtonianCrossSectionSvg(pres, fieldAngle, {
-      width: 1200,
-      height: 600,
-      pad: 30,
-      rays: 9,
-      conicSamples: 250,
-    });
 
     return svg || placeholderSvg(String(c.kind), String(c.id));
   }

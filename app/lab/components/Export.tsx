@@ -14,7 +14,9 @@ export function Export(props: {
 
   const markdown = useMemo(() => {
     if (!props.result) return '';
-    return exportSweepResultsMarkdown(props.result, props.tubeUnits);
+    return exportSweepResultsMarkdown(props.result, props.tubeUnits, {
+      includeAudit: true,
+    });
   }, [props.result, props.tubeUnits]);
 
   async function copyAction() {

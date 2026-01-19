@@ -1,5 +1,6 @@
 // src/optics/sweep.ts
 import type { Candidate, InputSpec, OpticDesignKind, Units } from "./types";
+import type { DesignContext } from "./designs/types";
 
 import { toMm } from "./units";
 import { computeScoreBounds, scoreCandidate } from "./score";
@@ -99,7 +100,10 @@ function formatUnits(u: Units): string {
   return u === "mm" ? "mm" : "in";
 }
 
-function collectRawCandidates(spec: InputSpec): Candidate[] {
+function collectRawCandidates(
+  spec: InputSpec,
+  ctx: DesignContext,
+): Candidate[] {
   const out: Candidate[] = [];
 
   const fpValues = enumerateRange(
@@ -127,13 +131,13 @@ function collectRawCandidates(spec: InputSpec): Candidate[] {
 
     for (const Fp of fpValues) {
       if (kind === "newtonian") {
-        const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fp });
+        const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fp }, ctx);
         if (c) out.push(c);
         continue;
       }
 
       for (const Fs of fsValues) {
-        const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fs });
+        const c = gen(spec, { primaryFRatio: Fp, systemFRatio: Fs }, ctx);
         if (c) out.push(c);
       }
     }
@@ -142,9 +146,12 @@ function collectRawCandidates(spec: InputSpec): Candidate[] {
   return out;
 }
 
-export function inferDerivedLimits(spec: InputSpec): InputSpec {
+export function inferDerivedLimits(
+  spec: InputSpec,
+  ctx: DesignContext,
+): InputSpec {
   const relaxed = relaxedSpecForInference(spec);
-  const raw = collectRawCandidates(relaxed);
+  const raw = collectRawCandidates(relaxed, ctx);
 
   let minFp = Infinity;
   let maxFp = -Infinity;
@@ -184,6 +191,7 @@ export function inferDerivedLimits(spec: InputSpec): InputSpec {
 function computeSweep(
   spec: InputSpec,
   topN: number,
+  ctx: DesignContext,
 ): {
   candidates: Candidate[];
   passing: Candidate[];
@@ -220,13 +228,13 @@ function computeSweep(
 
     for (const Fp of fpValues) {
       if (kind === "newtonian") {
-        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fp });
+        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fp }, ctx);
         if (raw) candidates.push(checkConstraints(spec, raw));
         continue;
       }
 
       for (const Fs of fsValues) {
-        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fs });
+        const raw = gen(relaxed, { primaryFRatio: Fp, systemFRatio: Fs }, ctx);
         if (raw) candidates.push(checkConstraints(spec, raw));
       }
     }
@@ -271,9 +279,13 @@ function computeSweep(
   };
 }
 
-export function runSweep(spec: InputSpec, topN: number = 25): SweepResult {
-  const first = computeSweep(spec, topN);
-  const derivedSpec = inferDerivedLimits(spec);
+export function runSweep(
+  spec: InputSpec,
+  ctx: DesignContext,
+  topN: number = 25,
+): SweepResult {
+  const first = computeSweep(spec, topN, ctx);
+  const derivedSpec = inferDerivedLimits(spec, ctx);
 
   if (first.passing.length > 0) {
     return {

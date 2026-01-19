@@ -1,23 +1,14 @@
 // src/optics/raytrace/debugSvg.ts
 import type {
-  ConicSurface,
-  PlaneSurface,
-  Ray,
+  OpticalPlan,
+  OpticalSimulator,
+  Surface,
+  SurfaceConic,
+  SurfacePlane,
+  TraceSegment,
   Vec3,
-  NewtonianPrescription,
-} from "./types";
-import { add, mul, normalize, v3 } from "./math";
-import { sagZ, surfaceNormal } from "./surface";
-import { intersectConic, intersectPlane, reflect } from "./trace";
-
-type Segment = { a: Vec3; b: Vec3 };
-
-type Bounds = {
-  minX: number;
-  maxX: number;
-  minZ: number;
-  maxZ: number;
-};
+  SampleSpec,
+} from "../plan/types";
 
 function finiteOr(v: number, fallback: number): number {
   return Number.isFinite(v) ? v : fallback;
@@ -31,74 +22,38 @@ function vMax(a: number, b: number): number {
   return a > b ? a : b;
 }
 
-function rayAt(o: Vec3, d: Vec3): Ray {
-  return { o, d: normalize(d) };
+function dot(a: Vec3, b: Vec3): number {
+  return a.x * b.x + a.y * b.y + a.z * b.z;
 }
 
-function makeRayAtPupil(
-  pupilX: number,
-  zStart: number,
-  fieldAngle: number,
-): Ray {
-  const dx = Math.sin(fieldAngle);
-  const dz = -Math.cos(fieldAngle);
-  return rayAt(v3(pupilX, 0, zStart), v3(dx, 0, dz));
+function norm(a: Vec3): number {
+  return Math.sqrt(dot(a, a));
 }
 
-function traceNewtonianWithSegments(
-  rayIn: Ray,
-  primary: ConicSurface,
-  secondary: PlaneSurface,
-  imagePlane: PlaneSurface,
-): { hit: Vec3 | null; segments: Segment[] } {
-  const segs: Segment[] = [];
-  const ray0: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
-
-  const hit1 = intersectConic(primary, ray0);
-  if (!hit1) return { hit: null, segments: segs };
-  segs.push({ a: ray0.o, b: hit1.p });
-
-  const n1 = surfaceNormal(primary, hit1.p);
-  const d1 = normalize(reflect(ray0.d, n1));
-  const ray1: Ray = { o: hit1.p, d: d1 };
-
-  const hit2 = intersectPlane(secondary, ray1);
-  if (!hit2) return { hit: null, segments: segs };
-  segs.push({ a: ray1.o, b: hit2.p });
-
-  const n2 = normalize(secondary.nHat);
-  const d2 = normalize(reflect(ray1.d, n2));
-  const ray2: Ray = { o: hit2.p, d: d2 };
-
-  const hit3 = intersectPlane(imagePlane, ray2);
-  if (!hit3) return { hit: null, segments: segs };
-  segs.push({ a: ray2.o, b: hit3.p });
-
-  return { hit: hit3.p, segments: segs };
+function normalize(a: Vec3): Vec3 {
+  const n = norm(a);
+  if (!(n > 0) || !Number.isFinite(n)) return { x: 0, y: 0, z: 0 };
+  return { x: a.x / n, y: a.y / n, z: a.z / n };
 }
 
-function sampleConicXZ(surface: ConicSurface, samples: number): Vec3[] {
-  const pts: Vec3[] = [];
-  const r = surface.apertureRadius;
-  const n = Math.max(2, samples | 0);
-
-  for (let i = 0; i < n; i++) {
-    const t = n === 1 ? 0 : i / (n - 1);
-    const x = (t * 2 - 1) * r;
-    const z = sagZ(surface, x, 0);
-    if (Number.isFinite(z)) pts.push({ x, y: 0, z });
-  }
-
-  return pts;
+function add(a: Vec3, b: Vec3): Vec3 {
+  return { x: a.x + b.x, y: a.y + b.y, z: a.z + b.z };
 }
 
-function samplePlaneXZ(surface: PlaneSurface, halfLen: number): Vec3[] {
-  const n = normalize(surface.nHat);
-  const tHat = normalize({ x: n.z, y: 0, z: -n.x });
-  const a = add(surface.p0, mul(tHat, -halfLen));
-  const b = add(surface.p0, mul(tHat, halfLen));
-  return [a, b];
+function mul(a: Vec3, s: number): Vec3 {
+  return { x: a.x * s, y: a.y * s, z: a.z * s };
 }
+
+function isFiniteVec3(p: Vec3): boolean {
+  return Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z);
+}
+
+type Bounds = {
+  minX: number;
+  maxX: number;
+  minZ: number;
+  maxZ: number;
+};
 
 function boundsFromPoints(points: Vec3[]): Bounds {
   let minX = Infinity;
@@ -152,65 +107,139 @@ function polyline(
   h: number,
   pad: number,
 ): string {
-  const pts = points
+  return points
     .map((p) => {
       const q = toSvgPoint(p, b, w, h, pad);
       return `${q.x.toFixed(2)},${q.y.toFixed(2)}`;
     })
     .join(" ");
+}
+
+function sagConicUnsigned(r: number, R: number, K: number): number {
+  const R2 = R * R;
+  if (!(R2 > 0) || !Number.isFinite(R2)) return NaN;
+
+  const u = ((1 + K) * (r * r)) / R2;
+  const inside = 1 - u;
+  if (inside <= 0) return NaN;
+
+  const s = Math.sqrt(inside);
+  const denom = R * (1 + s);
+  if (!Number.isFinite(denom) || denom === 0) return NaN;
+
+  return (r * r) / denom;
+}
+
+function sampleConicXZ(surface: SurfaceConic, samples: number): Vec3[] {
+  const pts: Vec3[] = [];
+  const rA = surface.aperture.radius_mm;
+  const n = Math.max(2, samples | 0);
+
+  for (let i = 0; i < n; i++) {
+    const t = n === 1 ? 0 : i / (n - 1);
+    const x = (t * 2 - 1) * rA;
+    const r = Math.abs(x);
+    const s = sagConicUnsigned(r, surface.R_mm, surface.K);
+    if (!Number.isFinite(s)) continue;
+    const z = surface.z0_mm + surface.sagSign * s;
+    pts.push({ x, y: 0, z });
+  }
+
   return pts;
 }
 
-export function renderNewtonianCrossSectionSvg(
-  pres: NewtonianPrescription,
-  fieldAngle: number,
+function samplePlaneXZ(surface: SurfacePlane, halfLen: number): Vec3[] {
+  const n = normalize(surface.nHat);
+  const tHat = normalize({ x: n.z, y: 0, z: -n.x });
+  const a = add(surface.p0_mm, mul(tHat, -halfLen));
+  const b = add(surface.p0_mm, mul(tHat, halfLen));
+  return [a, b];
+}
+
+function surfaceStrokeWidth(surface: Surface): number {
+  if (surface.kind === "plane" && surface.material.kind === "absorber")
+    return 1;
+  return 2;
+}
+
+function surfaceOpacity(surface: Surface): number {
+  if (surface.material.kind === "absorber") return 0.35;
+  if (surface.material.kind === "transmitter") return 0.7;
+  return 1.0;
+}
+
+export function renderPlanCrossSectionSvg(
+  plan: OpticalPlan,
+  simulator: OpticalSimulator,
+  sampleSpec: SampleSpec,
   opts?: {
     width?: number;
     height?: number;
     pad?: number;
-    rays?: number;
-    conicSamples?: number;
+    surfaceSamples?: number;
   },
 ): string {
   const width = finiteOr(opts?.width ?? 1200, 1200);
   const height = finiteOr(opts?.height ?? 600, 600);
   const pad = finiteOr(opts?.pad ?? 30, 30);
-  const rays = Math.max(3, (opts?.rays ?? 7) | 0);
-  const conicSamples = Math.max(20, (opts?.conicSamples ?? 200) | 0);
+  const surfaceSamples = Math.max(20, (opts?.surfaceSamples ?? 200) | 0);
 
-  const primaryPts = sampleConicXZ(pres.primary, conicSamples);
-  const secPts = samplePlaneXZ(pres.secondary, pres.secondary.apertureRadius);
-  const imgPts = samplePlaneXZ(pres.imagePlane, pres.imagePlane.apertureRadius);
+  const sim = simulator.simulate(plan, sampleSpec);
+  const rays = sim.traces?.rays ?? [];
+
+  const surfaceById = new Map<string, Surface>();
+  for (const s of plan.surfaces) surfaceById.set(s.id, s);
 
   const allPts: Vec3[] = [];
-  allPts.push(...primaryPts, ...secPts, ...imgPts);
 
-  const segs: Segment[] = [];
-  const pupilR = pres.pupilRadius;
-  const xMin = -pupilR;
-  const xMax = pupilR;
+  const surfacePolylines: {
+    id: string;
+    pts: Vec3[];
+  }[] = [];
 
-  for (let i = 0; i < rays; i++) {
-    const t = rays === 1 ? 0.5 : i / (rays - 1);
-    const px = xMin + t * (xMax - xMin);
-    const r = makeRayAtPupil(px, pres.zStart, fieldAngle);
-    const tr = traceNewtonianWithSegments(
-      r,
-      pres.primary,
-      pres.secondary,
-      pres.imagePlane,
-    );
-    segs.push(...tr.segments);
-    for (const s of tr.segments) {
+  for (const s of plan.surfaces) {
+    if (s.kind === "conic") {
+      const pts = sampleConicXZ(s, surfaceSamples);
+      surfacePolylines.push({ id: s.id, pts });
+      allPts.push(...pts);
+    } else {
+      const halfLen = s.aperture.radius_mm;
+      const pts = samplePlaneXZ(s, halfLen);
+      surfacePolylines.push({ id: s.id, pts });
+      allPts.push(...pts);
+    }
+  }
+
+  const sensorPlane = plan.sensor.plane;
+  const sensorPts = samplePlaneXZ(sensorPlane, sensorPlane.aperture.radius_mm);
+  allPts.push(...sensorPts);
+
+  const segs: TraceSegment[] = [];
+  for (const r of rays) {
+    for (const s of r.segments) {
+      if (!isFiniteVec3(s.a) || !isFiniteVec3(s.b)) continue;
+      segs.push(s);
       allPts.push(s.a, s.b);
     }
   }
 
   const b = boundsFromPoints(allPts);
 
-  const primaryPath = polyline(primaryPts, b, width, height, pad);
-  const secPath = polyline(secPts, b, width, height, pad);
-  const imgPath = polyline(imgPts, b, width, height, pad);
+  const axisA = toSvgPoint({ x: 0, y: 0, z: b.minZ }, b, width, height, pad);
+  const axisB = toSvgPoint({ x: 0, y: 0, z: b.maxZ }, b, width, height, pad);
+
+  const sensorPath = polyline(sensorPts, b, width, height, pad);
+
+  const surfacesSvg = surfacePolylines
+    .map((sp) => {
+      const s = surfaceById.get(sp.id);
+      if (!s) return "";
+      const pts = polyline(sp.pts, b, width, height, pad);
+      const sw = surfaceStrokeWidth(s);
+      const op = surfaceOpacity(s);
+      return `<polyline points="${pts}" fill="none" stroke="black" stroke-width="${sw}" opacity="${op.toFixed(3)}" />`;
+    })
+    .join("\n");
 
   const rayLines = segs
     .map((s) => {
@@ -220,16 +249,12 @@ export function renderNewtonianCrossSectionSvg(
     })
     .join("\n");
 
-  const axisA = toSvgPoint({ x: 0, y: 0, z: b.minZ }, b, width, height, pad);
-  const axisB = toSvgPoint({ x: 0, y: 0, z: b.maxZ }, b, width, height, pad);
-
   return `<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
   <rect x="0" y="0" width="${width}" height="${height}" fill="white" />
   <line x1="${axisA.x.toFixed(2)}" y1="${axisA.y.toFixed(2)}" x2="${axisB.x.toFixed(2)}" y2="${axisB.y.toFixed(2)}" stroke="#999" stroke-width="1" stroke-dasharray="4 4" />
-  <polyline points="${primaryPath}" fill="none" stroke="black" stroke-width="2" />
-  <polyline points="${secPath}" fill="none" stroke="black" stroke-width="2" />
-  <polyline points="${imgPath}" fill="none" stroke="black" stroke-width="2" />
+  ${surfacesSvg}
+  <polyline points="${sensorPath}" fill="none" stroke="black" stroke-width="2" opacity="0.9" />
   ${rayLines}
 </svg>`;
 }

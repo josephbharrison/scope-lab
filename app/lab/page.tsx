@@ -4,6 +4,7 @@
 import { useMemo, useState } from 'react';
 import type { InputSpec } from '../../src/optics/types';
 import type { SweepResult } from '../../src/optics/sweep';
+import type { DesignContext } from '../../src/optics/designs/types';
 
 import { inferDerivedLimits, runSweep } from '../../src/optics/sweep';
 import { presets } from '../../src/ui/presets';
@@ -19,6 +20,7 @@ import { Export } from './components/Export';
 
 import { toMm } from '../../src/optics/units';
 import { DEFAULT_TUBE_MARGIN_MM } from '../../src/optics/constants';
+import { createRaytraceSimulator } from '../../src/optics/raytrace/simulator';
 
 type SyncMode = 'design' | 'sweep';
 
@@ -283,10 +285,21 @@ function ToggleSwitch(props: {
 export default function LabPage() {
   const initial = defaultLabState();
 
+  const ctx: DesignContext = useMemo(() => {
+    return {
+      simulator: createRaytraceSimulator(),
+      scoringSampleSpec: {
+        pupil: { kind: 'grid', steps: 9 },
+        raysPerField: 49,
+        maxBounces: 8,
+      },
+    };
+  }, []);
+
   const [syncMode, setSyncMode] = useState<SyncMode>('design');
 
   const boot0 = reconcile(structuredClone(initial.spec), 'design');
-  const boot1 = inferDerivedLimits(boot0);
+  const boot1 = inferDerivedLimits(boot0, ctx);
   const bootFeasible = ensureFeasibleSpec(boot1);
 
   const [spec, setSpec] = useState<InputSpec>(() =>
@@ -314,22 +327,22 @@ export default function LabPage() {
     warnings: string[];
     result: SweepResult;
   } {
-    const withLimits0 = inferDerivedLimits(nextSpec);
+    const withLimits0 = inferDerivedLimits(nextSpec, ctx);
     const tuned0 = ensureFeasibleSpec(withLimits0);
 
-    const sweep0 = runSweep(tuned0.spec, nextTopN);
+    const sweep0 = runSweep(tuned0.spec, ctx, nextTopN);
     const sweepWarnings0 = Array.isArray(sweep0.warnings)
       ? sweep0.warnings
       : [];
 
     const applied0 = sweep0.appliedSpec ?? tuned0.spec;
-    const withLimits1 = sweep0.derivedSpec ?? inferDerivedLimits(applied0);
+    const withLimits1 = sweep0.derivedSpec ?? inferDerivedLimits(applied0, ctx);
     const tuned1 = ensureFeasibleSpec(withLimits1);
 
     const combined = mergeWarnings(tuned1.warnings, sweepWarnings0);
 
     if (JSON.stringify(tuned1.spec) !== JSON.stringify(tuned0.spec)) {
-      const sweep1 = runSweep(tuned1.spec, nextTopN);
+      const sweep1 = runSweep(tuned1.spec, ctx, nextTopN);
       const sweepWarnings1 = Array.isArray(sweep1.warnings)
         ? sweep1.warnings
         : [];
@@ -348,7 +361,7 @@ export default function LabPage() {
   }
 
   function applySpec(next: InputSpec) {
-    const withLimits = inferDerivedLimits(next);
+    const withLimits = inferDerivedLimits(next, ctx);
     const tuned = ensureFeasibleSpec(withLimits);
     setSpec(structuredClone(tuned.spec));
     setWarnings(tuned.warnings);
@@ -369,7 +382,7 @@ export default function LabPage() {
 
     setSpec((prev) => {
       const next = reconcile(prev, nextMode);
-      const withLimits = inferDerivedLimits(next);
+      const withLimits = inferDerivedLimits(next, ctx);
       const tuned = ensureFeasibleSpec(withLimits);
       setWarnings(tuned.warnings);
       return structuredClone(tuned.spec);
@@ -561,6 +574,8 @@ export default function LabPage() {
               result={result}
               runAction={runAction}
               tubeUnits={spec.constraints.tubeLengthUnits}
+              simulator={ctx.simulator}
+              scoringSampleSpec={ctx.scoringSampleSpec}
             />
           </div>
         </section>

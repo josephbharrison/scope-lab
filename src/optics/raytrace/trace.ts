@@ -3,7 +3,7 @@ import type { ConicSurface, PlaneSurface, Ray, Vec3 } from "./types";
 import { add, dot, mul, normalize, sub } from "./math";
 import { sagZ, dsagdrConicUnsigned, surfaceNormal } from "./surface";
 
-function withinAperture(surface: ConicSurface, p: Vec3): boolean {
+function withinApertureConic(surface: ConicSurface, p: Vec3): boolean {
   const r2 = p.x * p.x + p.y * p.y;
   return r2 <= surface.apertureRadius * surface.apertureRadius + 1e-12;
 }
@@ -44,7 +44,7 @@ export function intersectConic(
     if (Math.abs(f) < 1e-9) {
       if (t < 0) return null;
       const hit = { x: p.x, y: p.y, z: zSurf };
-      if (!withinAperture(surface, hit)) return null;
+      if (!withinApertureConic(surface, hit)) return null;
       return { t, p: hit };
     }
 
@@ -68,16 +68,6 @@ export function intersectConic(
   return null;
 }
 
-export function propagateToPlaneZ(rayIn: Ray, z: number): Vec3 | null {
-  const ray: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
-  if (Math.abs(ray.d.z) < 1e-12) return null;
-
-  const t = (z - ray.o.z) / ray.d.z;
-  if (!Number.isFinite(t) || t < 0) return null;
-
-  return add(ray.o, mul(ray.d, t));
-}
-
 export function intersectPlane(
   surface: PlaneSurface,
   rayIn: Ray,
@@ -95,55 +85,38 @@ export function intersectPlane(
   return { t, p };
 }
 
+export function surfaceNormalConic(surface: ConicSurface, p: Vec3): Vec3 {
+  return surfaceNormal(surface, p);
+}
+
 export function traceTwoMirror(
-  rayIn: Ray,
+  ray: Ray,
   primary: ConicSurface,
   secondary: ConicSurface,
   imagePlaneZ: number,
 ): Vec3 | null {
-  const ray0: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
+  const h1 = intersectConic(primary, ray);
+  if (!h1) return null;
 
-  const hit1 = intersectConic(primary, ray0);
-  if (!hit1) return null;
+  const n1 = surfaceNormalConic(primary, h1.p);
+  const d1 = reflect(ray.d, n1);
 
-  const n1 = surfaceNormal(primary, hit1.p);
-  const d1 = normalize(reflect(ray0.d, n1));
-  const ray1: Ray = { o: hit1.p, d: d1 };
+  const r2: Ray = { o: h1.p, d: d1 };
+  const h2 = intersectConic(secondary, r2);
+  if (!h2) return null;
 
-  const hit2 = intersectConic(secondary, ray1);
-  if (!hit2) return null;
+  const n2 = surfaceNormalConic(secondary, h2.p);
+  const d2 = reflect(r2.d, n2);
 
-  const n2 = surfaceNormal(secondary, hit2.p);
-  const d2 = normalize(reflect(ray1.d, n2));
-  const ray2: Ray = { o: hit2.p, d: d2 };
+  const denom = d2.z;
+  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
 
-  return propagateToPlaneZ(ray2, imagePlaneZ);
-}
+  const t = (imagePlaneZ - h2.p.z) / denom;
+  if (!Number.isFinite(t) || t < 0) return null;
 
-export function traceNewtonian(
-  rayIn: Ray,
-  primary: ConicSurface,
-  secondary: PlaneSurface,
-  imagePlane: PlaneSurface,
-): Vec3 | null {
-  const ray0: Ray = { o: rayIn.o, d: normalize(rayIn.d) };
-
-  const hit1 = intersectConic(primary, ray0);
-  if (!hit1) return null;
-
-  const n1 = surfaceNormal(primary, hit1.p);
-  const d1 = normalize(reflect(ray0.d, n1));
-  const ray1: Ray = { o: hit1.p, d: d1 };
-
-  const hit2 = intersectPlane(secondary, ray1);
-  if (!hit2) return null;
-
-  const n2 = normalize(secondary.nHat);
-  const d2 = normalize(reflect(ray1.d, n2));
-  const ray2: Ray = { o: hit2.p, d: d2 };
-
-  const hit3 = intersectPlane(imagePlane, ray2);
-  if (!hit3) return null;
-
-  return hit3.p;
+  return {
+    x: h2.p.x + d2.x * t,
+    y: h2.p.y + d2.y * t,
+    z: imagePlaneZ,
+  };
 }

@@ -1,5 +1,7 @@
 // src/optics/designs/cassegrain.ts
-import type { Candidate, DesignGenerator, InputSpec } from "../types";
+import type { Candidate } from "../types";
+import type { DesignGenerator } from "./types";
+import type { OpticalPlan, SurfaceConic, SurfacePlane } from "../plan/types";
 
 import { toMm, areaCircle } from "../units";
 import {
@@ -8,21 +10,16 @@ import {
   CASSEGRAIN_BAFFLE_FACTOR,
 } from "../constants";
 import { twoMirrorLayout } from "./twoMirror";
-import { evaluateImageQualityTwoMirror } from "../raytrace/imageQuality";
 import { adaptRaytraceToMetrics } from "../raytrace/adapt";
-import { traceCountsTwoMirror } from "../diagnostics/backfocusTest";
 
-function shouldRunBackfocusDiag(spec: InputSpec): boolean {
-  const minBackFocus_mm = toMm(
-    spec.constraints.minBackFocus,
-    spec.constraints.backFocusUnits,
-  );
-  return Number.isFinite(minBackFocus_mm) && minBackFocus_mm > 0;
+function clampNonNegativeFinite(v: number): number {
+  return Number.isFinite(v) && v >= 0 ? v : 0;
 }
 
 export const cassegrain: DesignGenerator = (
-  spec: InputSpec,
+  spec,
   params,
+  ctx,
 ): Candidate | null => {
   const D_mm = toMm(spec.aperture, spec.apertureUnits);
   const Fp = params.primaryFRatio;
@@ -68,9 +65,8 @@ export const cassegrain: DesignGenerator = (
     );
   }
 
-  const minBackFocus_mm = toMm(
-    spec.constraints.minBackFocus,
-    spec.constraints.backFocusUnits,
+  const minBackFocus_mm = clampNonNegativeFinite(
+    toMm(spec.constraints.minBackFocus, spec.constraints.backFocusUnits),
   );
 
   if (
@@ -89,90 +85,80 @@ export const cassegrain: DesignGenerator = (
   const obstructionArea_mm2 = areaCircle(obstructionDiameter_mm);
 
   const mirrorCount = 2;
-  const transmissionFactor = Math.pow(
-    spec.coatings.reflectivityPerMirror || DEFAULT_REFLECTIVITY_PER_MIRROR,
-    mirrorCount,
-  );
+  const reflectivity =
+    spec.coatings.reflectivityPerMirror ?? DEFAULT_REFLECTIVITY_PER_MIRROR;
+  const transmissionFactor = Math.pow(reflectivity, mirrorCount);
 
   const effectiveArea_mm2 =
     (primaryArea_mm2 - obstructionArea_mm2) * transmissionFactor;
   const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
 
-  const fieldRadius_mm = toMm(
-    spec.constraints.fullyIlluminatedFieldRadius,
-    spec.constraints.fieldUnits,
+  const fieldRadius_mm = clampNonNegativeFinite(
+    toMm(
+      spec.constraints.fullyIlluminatedFieldRadius,
+      spec.constraints.fieldUnits,
+    ),
   );
 
-  const fieldSafe = Math.max(
-    0,
-    Number.isFinite(fieldRadius_mm) ? fieldRadius_mm : 0,
-  );
-  const fieldAngle = fieldSafe / layout.fSystem_mm;
+  const fieldAngle_rad =
+    fieldRadius_mm > 0 ? fieldRadius_mm / layout.fSystem_mm : 0;
 
-  const primary = {
-    z0: 0,
-    R: -2 * layout.fPrimary_mm,
+  const primary: SurfaceConic = {
+    kind: "conic",
+    id: "primary",
+    z0_mm: 0,
+    R_mm: -2 * layout.fPrimary_mm,
     K: -1,
-    sagSign: -1 as const,
-    apertureRadius: 0.5 * D_mm,
+    sagSign: -1,
+    aperture: { kind: "circle", radius_mm: 0.5 * D_mm },
+    material: { kind: "reflector", reflectivity },
   };
 
-  const secondary = {
-    z0: -layout.dPrimaryToSecondary_mm,
-    R: 2 * (-layout.fPrimary_mm / Math.max(1e-6, layout.magnification - 1)),
+  const secondary: SurfaceConic = {
+    kind: "conic",
+    id: "secondary",
+    z0_mm: -layout.dPrimaryToSecondary_mm,
+    R_mm: 2 * (-layout.fPrimary_mm / Math.max(1e-6, layout.magnification - 1)),
     K: -1,
-    sagSign: 1 as const,
-    apertureRadius: 0.5 * secondaryDiameter_mm,
+    sagSign: 1,
+    aperture: { kind: "circle", radius_mm: 0.5 * secondaryDiameter_mm },
+    material: { kind: "reflector", reflectivity },
   };
 
-  if (shouldRunBackfocusDiag(spec)) {
-    const zStart = -5 * layout.fPrimary_mm;
-    const pupilRadius = 0.5 * D_mm;
-
-    const presPlus = {
-      primary,
-      secondary,
-      imagePlaneZ: layout.backFocus_mm,
-      zStart,
-      pupilRadius,
-    };
-
-    const presMinus = {
-      primary,
-      secondary,
-      imagePlaneZ: -layout.backFocus_mm,
-      zStart,
-      pupilRadius,
-    };
-
-    const plus = traceCountsTwoMirror(presPlus, fieldAngle);
-    const minus = traceCountsTwoMirror(presMinus, fieldAngle);
-
-    console.log({
-      diag: "backfocus",
-      kind: "cassegrain",
-      Fp,
-      Fs,
-      backFocus_mm: layout.backFocus_mm,
-      plus,
-      minus,
-    });
-  }
-
-  const pres = {
-    primary,
-    secondary,
-    imagePlaneZ: layout.backFocus_mm,
-    zStart: -5 * layout.fPrimary_mm,
-    pupilRadius: 0.5 * D_mm,
+  const sensorPlane: SurfacePlane = {
+    kind: "plane",
+    id: "sensor",
+    p0_mm: { x: 0, y: 0, z: layout.backFocus_mm },
+    nHat: { x: 0, y: 0, z: 1 },
+    aperture: { kind: "circle", radius_mm: Math.max(1, 2 * fieldRadius_mm) },
+    material: { kind: "absorber" },
   };
 
-  const iq = evaluateImageQualityTwoMirror(spec, pres, fieldAngle);
-  const aberrations = adaptRaytraceToMetrics(iq, Fs);
+  const plan: OpticalPlan = {
+    id: `cass-Fp${Fp.toFixed(2)}-Fs${Fs.toFixed(2)}`,
+    label: "Cassegrain",
+    entrance: {
+      zStart_mm: -5 * layout.fPrimary_mm,
+      pupilRadius_mm: 0.5 * D_mm,
+      fieldAngles_rad: [0, fieldAngle_rad],
+    },
+    surfaces: [primary, secondary],
+    sensor: { id: "sensor", plane: sensorPlane },
+  };
+
+  const sim = ctx.simulator.simulate(plan, ctx.scoringSampleSpec);
+  const iq = sim.imageQuality ?? [];
+  if (iq.length === 0) return null;
+
+  const iqOnAxis = iq[0];
+  const iqEdge = iq[iq.length - 1];
+  const aberrations = adaptRaytraceToMetrics(iqEdge, Fs, iqOnAxis);
 
   return {
-    id: `cass-Fp${Fp.toFixed(2)}-Fs${Fs.toFixed(2)}`,
+    id: plan.id,
     kind: "cassegrain",
+    plan,
+
     inputs: {
       aperture_mm: D_mm,
       primaryFRatio: Fp,
@@ -180,12 +166,14 @@ export const cassegrain: DesignGenerator = (
       primaryFocalLength_mm: layout.fPrimary_mm,
       systemFocalLength_mm: layout.fSystem_mm,
     },
+
     geometry: {
       tubeLength_mm,
       backFocus_mm: layout.backFocus_mm,
       secondaryDiameter_mm: obstructionDiameter_mm,
       obstructionRatio,
     },
+
     throughput: {
       primaryArea_mm2,
       effectiveArea_mm2,
@@ -193,18 +181,19 @@ export const cassegrain: DesignGenerator = (
       mirrorCount,
       transmissionFactor,
     },
+
     aberrations,
-    constraints: {
-      pass,
-      reasons,
-    },
+
+    constraints: { pass, reasons },
+
     score: {
       total: 0,
-      terms: {
-        usableLight: 0,
-        aberration: 0,
-        obstruction: 0,
-      },
+      terms: { usableLight: 0, aberration: 0, obstruction: 0 },
+    },
+
+    audit: {
+      scoringSampleSpec: ctx.scoringSampleSpec,
+      imageQuality: iq,
     },
   };
 };

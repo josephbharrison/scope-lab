@@ -1,4 +1,7 @@
 // src/optics/types.ts
+//
+import type { OpticalPlan } from "./plan/types";
+import type { SimulationAudit } from "./audit/types";
 export type OpticDesignKind = "newtonian" | "cassegrain" | "sct" | "rc";
 
 export type Units = "mm" | "inch";
@@ -100,9 +103,15 @@ export type ConstraintResult = {
   reasons: string[];
 };
 
+export type DesignGenerator = (
+  spec: InputSpec,
+  params: DesignParams,
+) => Candidate | null;
+
 export type Candidate = {
   id: string;
   kind: OpticDesignKind;
+  plan: OpticalPlan;
   inputs: {
     aperture_mm: number;
     primaryFRatio: number;
@@ -115,14 +124,10 @@ export type Candidate = {
   aberrations: ImageQualityMetrics;
   constraints: ConstraintResult;
   score: ScoreResult;
+  audit?: SimulationAudit;
 };
 
 export type DesignParams = {
   primaryFRatio: number;
   systemFRatio: number;
 };
-
-export type DesignGenerator = (
-  spec: InputSpec,
-  params: DesignParams,
-) => Candidate | null;
