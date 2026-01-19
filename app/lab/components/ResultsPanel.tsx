@@ -1,3 +1,4 @@
+// app/lab/components/ResultsPanel.tsx
 'use client';
 
 import type {
@@ -22,26 +23,31 @@ import { ScopeLabResultsViewer } from './ScopeLabResultsView';
 
 type ViewerCandidate = Candidate;
 
-function normKind(kind: unknown): string {
-  return String(kind ?? '')
-    .trim()
-    .toLowerCase();
-}
-
-function isNewtonianKind(kind: unknown): boolean {
-  const k = normKind(kind);
-  return k === 'newtonian' || k === 'newt' || k === 'newton';
-}
-
-function placeholderSvg(kind: string, id: string): string {
-  const k = kind.toUpperCase();
-  const safeId = id;
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="200" viewBox="0 0 1200 200">
-  <rect x="0" y="0" width="1200" height="200" fill="white" />
-  <text x="24" y="60" font-family="monospace" font-size="20">No SVG for this candidate (currently only Newt is supported).</text>
-  <text x="24" y="100" font-family="monospace" font-size="16">${k}</text>
-  <text x="24" y="130" font-family="monospace" font-size="14">${safeId}</text>
-</svg>`;
+function placeholderHtml(kind: string, id: string): string {
+  const k = String(kind ?? '').toUpperCase();
+  const safeId = String(id ?? '');
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: white; }
+      #wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+      svg { display:block; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">
+      <svg xmlns="http://www.w3.org/2000/svg" width="1200" height="200" viewBox="0 0 1200 200">
+        <rect x="0" y="0" width="1200" height="200" fill="white" />
+        <text x="24" y="60" font-family="monospace" font-size="20">No SVG/HTML for this candidate.</text>
+        <text x="24" y="100" font-family="monospace" font-size="16">${k}</text>
+        <text x="24" y="130" font-family="monospace" font-size="14">${safeId}</text>
+      </svg>
+    </div>
+  </body>
+</html>`;
 }
 
 export function ResultsPanel(props: {
@@ -101,9 +107,9 @@ export function ResultsPanel(props: {
   async function loadSvgForCandidate(c: ViewerCandidate): Promise<string> {
     const debugSvg = await import('../../../src/optics/raytrace/debugSvg');
 
-    if (!c.plan) return placeholderSvg(String(c.kind), String(c.id));
+    if (!c.plan) return placeholderHtml(String(c.kind), String(c.id));
 
-    const svg = debugSvg.renderPlanCrossSectionSvg(
+    const html = debugSvg.renderPlanCrossSectionHtml(
       c.plan,
       props.simulator,
       props.scoringSampleSpec,
@@ -112,10 +118,12 @@ export function ResultsPanel(props: {
         height: 600,
         pad: 30,
         surfaceSamples: 250,
+        initialBoundsZoom: 3.8,
+        initialInteractiveZoom: 1.0,
       }
     );
 
-    return svg || placeholderSvg(String(c.kind), String(c.id));
+    return html || placeholderHtml(String(c.kind), String(c.id));
   }
 
   return (

@@ -77,6 +77,21 @@ function boundsFromPoints(points: Vec3[]): Bounds {
   return { minX, maxX, minZ, maxZ };
 }
 
+function zoomBounds(b: Bounds, zoom: number): Bounds {
+  const z = Number.isFinite(zoom) && zoom > 0 ? zoom : 1;
+  const cx = 0.5 * (b.minX + b.maxX);
+  const cz = 0.5 * (b.minZ + b.maxZ);
+  const hx = (0.5 * (b.maxX - b.minX)) / z;
+  const hz = (0.5 * (b.maxZ - b.minZ)) / z;
+  const eps = 1e-9;
+  return {
+    minX: cx - Math.max(eps, hx),
+    maxX: cx + Math.max(eps, hx),
+    minZ: cz - Math.max(eps, hz),
+    maxZ: cz + Math.max(eps, hz),
+  };
+}
+
 function toSvgPoint(
   p: Vec3,
   b: Bounds,
@@ -170,6 +185,65 @@ function surfaceOpacity(surface: Surface): number {
   return 1.0;
 }
 
+function renderSvgMarkup(
+  width: number,
+  height: number,
+  axisA: { x: number; y: number },
+  axisB: { x: number; y: number },
+  surfacesSvg: string,
+  sensorPath: string,
+  rayLines: string,
+  initialInteractiveZoom: number,
+): string {
+  const cx = width * 0.5;
+  const cy = height * 0.5;
+  const rot = `translate(${cx},${cy}) rotate(-90) translate(${-cx},${-cy})`;
+  const z0 =
+    Number.isFinite(initialInteractiveZoom) && initialInteractiveZoom > 0
+      ? initialInteractiveZoom
+      : 1;
+
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<svg id="scope-svg"
+     xmlns="http://www.w3.org/2000/svg"
+     width="${width}"
+     height="${height}"
+     viewBox="0 0 ${width} ${height}"
+     style="touch-action:none; cursor:grab; user-select:none; -webkit-user-select:none; display:block;">
+  <rect x="0" y="0" width="${width}" height="${height}" fill="white" />
+
+  <g id="viewport" transform="translate(0,0) scale(${z0}) ${rot}">
+    <line x1="${axisA.x.toFixed(2)}" y1="${axisA.y.toFixed(2)}"
+          x2="${axisB.x.toFixed(2)}" y2="${axisB.y.toFixed(2)}"
+          stroke="#999" stroke-width="1" stroke-dasharray="4 4" />
+    ${surfacesSvg}
+    <polyline points="${sensorPath}" fill="none" stroke="black" stroke-width="2" opacity="0.9" />
+    ${rayLines}
+  </g>
+
+  <g id="hud" opacity="0.92">
+    <rect x="10" y="10" width="560" height="54" fill="white" stroke="#999" />
+    <text x="20" y="30" font-family="sans-serif" font-size="14">Drag: pan  Double-click: reset</text>
+    <text x="20" y="50" font-family="sans-serif" font-size="14">Wheel: zoom (scroll blocked while over SVG)</text>
+
+    <g id="btnZoomIn">
+      <rect x="590" y="10" width="36" height="24" fill="white" stroke="#999" />
+      <text x="602" y="27" font-family="sans-serif" font-size="16">+</text>
+    </g>
+
+    <g id="btnZoomOut">
+      <rect x="630" y="10" width="36" height="24" fill="white" stroke="#999" />
+      <text x="644" y="27" font-family="sans-serif" font-size="16">-</text>
+    </g>
+
+    <g id="btnReset">
+      <rect x="670" y="10" width="70" height="24" fill="white" stroke="#999" />
+      <text x="684" y="27" font-family="sans-serif" font-size="14">Reset</text>
+    </g>
+  </g>
+</svg>`;
+}
+
 export function renderPlanCrossSectionSvg(
   plan: OpticalPlan,
   simulator: OpticalSimulator,
@@ -179,12 +253,20 @@ export function renderPlanCrossSectionSvg(
     height?: number;
     pad?: number;
     surfaceSamples?: number;
+    initialBoundsZoom?: number;
+    initialInteractiveZoom?: number;
   },
 ): string {
   const width = finiteOr(opts?.width ?? 1200, 1200);
   const height = finiteOr(opts?.height ?? 600, 600);
   const pad = finiteOr(opts?.pad ?? 30, 30);
-  const surfaceSamples = Math.max(20, (opts?.surfaceSamples ?? 200) | 0);
+  const surfaceSamples = Math.max(20, (opts?.surfaceSamples ?? 250) | 0);
+
+  const initialBoundsZoom = finiteOr(opts?.initialBoundsZoom ?? 3.8, 3.8);
+  const initialInteractiveZoom = finiteOr(
+    opts?.initialInteractiveZoom ?? 1.0,
+    1.0,
+  );
 
   const sim = simulator.simulate(plan, sampleSpec);
   const rays = sim.traces?.rays ?? [];
@@ -193,11 +275,7 @@ export function renderPlanCrossSectionSvg(
   for (const s of plan.surfaces) surfaceById.set(s.id, s);
 
   const allPts: Vec3[] = [];
-
-  const surfacePolylines: {
-    id: string;
-    pts: Vec3[];
-  }[] = [];
+  const surfacePolylines: { id: string; pts: Vec3[] }[] = [];
 
   for (const s of plan.surfaces) {
     if (s.kind === "conic") {
@@ -225,7 +303,8 @@ export function renderPlanCrossSectionSvg(
     }
   }
 
-  const b = boundsFromPoints(allPts);
+  const b0 = boundsFromPoints(allPts);
+  const b = zoomBounds(b0, initialBoundsZoom);
 
   const axisA = toSvgPoint({ x: 0, y: 0, z: b.minZ }, b, width, height, pad);
   const axisB = toSvgPoint({ x: 0, y: 0, z: b.maxZ }, b, width, height, pad);
@@ -251,12 +330,181 @@ export function renderPlanCrossSectionSvg(
     })
     .join("\n");
 
-  return `<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}">
-  <rect x="0" y="0" width="${width}" height="${height}" fill="white" />
-  <line x1="${axisA.x.toFixed(2)}" y1="${axisA.y.toFixed(2)}" x2="${axisB.x.toFixed(2)}" y2="${axisB.y.toFixed(2)}" stroke="#999" stroke-width="1" stroke-dasharray="4 4" />
-  ${surfacesSvg}
-  <polyline points="${sensorPath}" fill="none" stroke="black" stroke-width="2" opacity="0.9" />
-  ${rayLines}
-</svg>`;
+  return renderSvgMarkup(
+    width,
+    height,
+    axisA,
+    axisB,
+    surfacesSvg,
+    sensorPath,
+    rayLines,
+    initialInteractiveZoom,
+  );
+}
+
+export function renderPlanCrossSectionHtml(
+  plan: OpticalPlan,
+  simulator: OpticalSimulator,
+  sampleSpec: SampleSpec,
+  opts?: {
+    width?: number;
+    height?: number;
+    pad?: number;
+    surfaceSamples?: number;
+    initialBoundsZoom?: number;
+    initialInteractiveZoom?: number;
+  },
+): string {
+  const width = finiteOr(opts?.width ?? 1200, 1200);
+  const height = finiteOr(opts?.height ?? 600, 600);
+
+  const svg = renderPlanCrossSectionSvg(plan, simulator, sampleSpec, opts);
+
+  const cx = width * 0.5;
+  const cy = height * 0.5;
+  const rot = `translate(${cx},${cy}) rotate(-90) translate(${-cx},${-cy})`;
+
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <style>
+      html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: white; }
+      #wrap { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+    </style>
+  </head>
+  <body>
+    <div id="wrap">${svg}</div>
+    <script>
+      (function(){
+        var svg = document.getElementById('scope-svg');
+        if (!svg) return;
+
+        var vp = document.getElementById('viewport');
+        if (!vp) return;
+
+        var btnIn = document.getElementById('btnZoomIn');
+        var btnOut = document.getElementById('btnZoomOut');
+        var btnReset = document.getElementById('btnReset');
+
+        var state = { scale: 1, tx: 0, ty: 0, dragging: false, pid: null, lastX: 0, lastY: 0 };
+        var base = { scale: 1, tx: 0, ty: 0 };
+
+        function clampScale(s){
+          if (s < 0.05) return 0.05;
+          if (s > 100) return 100;
+          return s;
+        }
+
+        function apply(){
+          var panzoom = 'translate(' + state.tx + ',' + state.ty + ') scale(' + state.scale + ')';
+          vp.setAttribute('transform', panzoom + ' ${rot}');
+        }
+
+        function getPoint(evt){
+          var rect = svg.getBoundingClientRect();
+          return { x: evt.clientX - rect.left, y: evt.clientY - rect.top };
+        }
+
+        function zoomAt(factor, px, py){
+          var s0 = state.scale;
+          var s1 = clampScale(s0 * factor);
+          var k = s1 / s0;
+          state.tx = px - k * (px - state.tx);
+          state.ty = py - k * (py - state.ty);
+          state.scale = s1;
+          apply();
+        }
+
+        function reset(){
+          state.scale = base.scale;
+          state.tx = base.tx;
+          state.ty = base.ty;
+          apply();
+        }
+
+        function isHudTarget(t){
+          if (!t) return false;
+          var id = t.id || '';
+          if (id === 'btnZoomIn' || id === 'btnZoomOut' || id === 'btnReset') return true;
+          var p = t.parentNode;
+          while (p && p !== svg) {
+            if (p.id === 'btnZoomIn' || p.id === 'btnZoomOut' || p.id === 'btnReset') return true;
+            p = p.parentNode;
+          }
+          return false;
+        }
+
+        svg.addEventListener('wheel', function(evt){
+          evt.preventDefault();
+          var p = getPoint(evt);
+          var dir = evt.deltaY < 0 ? 1.15 : 1/1.15;
+          zoomAt(dir, p.x, p.y);
+        }, { passive: false });
+
+        svg.addEventListener('pointerdown', function(evt){
+          if (isHudTarget(evt.target)) return;
+          state.dragging = true;
+          state.pid = evt.pointerId;
+          svg.setPointerCapture(evt.pointerId);
+          svg.style.cursor = 'grabbing';
+          var p = getPoint(evt);
+          state.lastX = p.x;
+          state.lastY = p.y;
+          evt.preventDefault();
+        });
+
+        svg.addEventListener('pointermove', function(evt){
+          if (!state.dragging) return;
+          if (state.pid !== evt.pointerId) return;
+          var p = getPoint(evt);
+          state.tx += (p.x - state.lastX);
+          state.ty += (p.y - state.lastY);
+          state.lastX = p.x;
+          state.lastY = p.y;
+          apply();
+          evt.preventDefault();
+        });
+
+        svg.addEventListener('pointerup', function(evt){
+          if (state.pid !== evt.pointerId) return;
+          state.dragging = false;
+          state.pid = null;
+          svg.style.cursor = 'grab';
+          evt.preventDefault();
+        });
+
+        svg.addEventListener('pointercancel', function(evt){
+          if (state.pid !== evt.pointerId) return;
+          state.dragging = false;
+          state.pid = null;
+          svg.style.cursor = 'grab';
+          evt.preventDefault();
+        });
+
+        svg.addEventListener('dblclick', function(evt){
+          evt.preventDefault();
+          reset();
+        });
+
+        function bindButton(el, fn){
+          if (!el) return;
+          el.style.cursor = 'pointer';
+          el.addEventListener('click', function(evt){
+            evt.preventDefault();
+            evt.stopPropagation();
+            fn();
+          });
+        }
+
+        bindButton(btnIn, function(){ zoomAt(1.25, ${width} * 0.5, ${height} * 0.5); });
+        bindButton(btnOut, function(){ zoomAt(1/1.25, ${width} * 0.5, ${height} * 0.5); });
+        bindButton(btnReset, function(){ reset(); });
+
+        apply();
+      })();
+    </script>
+  </body>
+</html>`;
 }

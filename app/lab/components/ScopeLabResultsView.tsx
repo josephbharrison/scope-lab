@@ -1,7 +1,7 @@
 // app/lab/components/ScopeLabResultsView.tsx
 'use client';
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState, useEffect } from 'react';
 import type { Candidate } from '../../../src/optics/types';
 
 type Props = {
@@ -24,6 +24,23 @@ function errToString(e: unknown): string {
   return String(e);
 }
 
+function isHtmlDoc(s: string): boolean {
+  const t = String(s ?? '')
+    .trim()
+    .toLowerCase();
+  return t.startsWith('<!doctype html') || t.startsWith('<html');
+}
+
+function svgOnlyFromString(s: string): string {
+  const str = String(s ?? '');
+  const lo = str.toLowerCase();
+  const i = lo.indexOf('<svg');
+  if (i < 0) return str;
+  const j = lo.lastIndexOf('</svg>');
+  if (j < 0) return str.slice(i);
+  return str.slice(i, j + 6);
+}
+
 export function ScopeLabResultsViewer(props: Props) {
   const { candidates, loadSvgAction, title } = props;
 
@@ -37,9 +54,12 @@ export function ScopeLabResultsViewer(props: Props) {
     sorted[0]?.id ?? null
   );
   const [svg, setSvg] = useState<string>('');
+  const [html, setHtml] = useState<string>('');
   const [status, setStatus] = useState<'idle' | 'loading' | 'error'>('idle');
   const [errorText, setErrorText] = useState<string>('');
   const [emptyText, setEmptyText] = useState<string>('');
+
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
 
   const selected = useMemo(() => {
     if (!selectedId) return null;
@@ -50,18 +70,25 @@ export function ScopeLabResultsViewer(props: Props) {
     setSelectedId(c.id);
     setStatus('loading');
     setSvg('');
+    setHtml('');
     setErrorText('');
     setEmptyText('');
     try {
       const s = await loadSvgAction(c);
       if (!s) {
-        setEmptyText(
-          'No SVG for this candidate (currently only Newt is supported).'
-        );
+        setEmptyText('No SVG/HTML for this candidate.');
         setStatus('idle');
         return;
       }
-      setSvg(s);
+
+      if (isHtmlDoc(s)) {
+        setHtml(s);
+        setSvg('');
+      } else {
+        setSvg(svgOnlyFromString(s));
+        setHtml('');
+      }
+
       setStatus('idle');
     } catch (e) {
       const msg = errToString(e);
@@ -70,6 +97,29 @@ export function ScopeLabResultsViewer(props: Props) {
       setStatus('error');
     }
   }
+
+  useEffect(() => {
+    if (!html) return;
+    const f = iframeRef.current;
+    if (!f) return;
+
+    const onWheel = (evt: WheelEvent) => {
+      const r = f.getBoundingClientRect();
+      const inside =
+        evt.clientX >= r.left &&
+        evt.clientX <= r.right &&
+        evt.clientY >= r.top &&
+        evt.clientY <= r.bottom;
+
+      if (!inside) return;
+      if (evt.ctrlKey || evt.metaKey) return;
+
+      evt.preventDefault();
+    };
+
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [html]);
 
   return (
     <div
@@ -277,9 +327,10 @@ export function ScopeLabResultsViewer(props: Props) {
           border: '1px solid #ddd',
           borderRadius: 8,
           minHeight: '40vh',
-          overflow: 'auto',
+          overflow: 'hidden',
           padding: 8,
           minWidth: 0,
+          background: 'white',
         }}
       >
         {status === 'loading' ? (
@@ -287,7 +338,7 @@ export function ScopeLabResultsViewer(props: Props) {
         ) : null}
         {status === 'error' ? (
           <div style={{ padding: 12 }}>
-            <div style={{ marginBottom: 8 }}>failed to render svg</div>
+            <div style={{ marginBottom: 8 }}>failed to render</div>
             {errorText ? (
               <pre
                 style={{
@@ -304,11 +355,32 @@ export function ScopeLabResultsViewer(props: Props) {
         {status === 'idle' && emptyText ? (
           <div style={{ padding: 12 }}>{emptyText}</div>
         ) : null}
-        {svg ? (
+
+        {html ? (
+          <iframe
+            ref={iframeRef}
+            title='scope-lab-svg'
+            sandbox='allow-scripts'
+            srcDoc={html}
+            style={{
+              width: '100%',
+              height: '100%',
+              border: 0,
+              display: 'block',
+              background: 'white',
+            }}
+          />
+        ) : null}
+
+        {!html && svg ? (
           <div
-            style={{ maxWidth: '100%' }}
+            style={{ width: '100%', height: '100%' }}
             dangerouslySetInnerHTML={{ __html: svg }}
           />
+        ) : null}
+
+        {!html && !svg && status === 'idle' && !emptyText ? (
+          <div style={{ padding: 12 }}>Click a candidate to load the view.</div>
         ) : null}
       </div>
     </div>
