@@ -58,9 +58,6 @@ export function intersectConic(
       const hit = { x: p.x, y: p.y, z: zSurf };
       if (!withinApertureConic(surface, hit)) return null;
 
-      const nHat = surfaceNormal(surface, hit);
-      if (dot(ray.d, nHat) >= 0) return null;
-
       return { t, p: hit };
     }
 

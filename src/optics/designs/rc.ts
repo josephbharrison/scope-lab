@@ -72,14 +72,13 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
 
   const m = layout.magnification;
 
-  // src/optics/designs/rc.ts
   const secondary: SurfaceConic = {
     kind: "conic",
     id: "secondary",
     z0_mm: -layout.dPrimaryToSecondary_mm,
     R_mm: -2 * (layout.fPrimary_mm / (m - 1)),
     K: -2.4,
-    sagSign: 1,
+    sagSign: -1,
     aperture: { kind: "circle", radius_mm: 0.5 * secondaryDiameter_mm },
     material: { kind: "reflector", reflectivity },
   };

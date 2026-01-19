@@ -11,7 +11,9 @@ export function sagConicUnsigned(r: number, R: number, K: number): number {
   if (inside <= 0) return NaN;
 
   const s = Math.sqrt(inside);
-  const denom = R * (1 + s);
+
+  const absR = Math.abs(R);
+  const denom = absR * (1 + s);
   if (!Number.isFinite(denom) || denom === 0) return NaN;
 
   return (r * r) / denom;
@@ -29,8 +31,10 @@ export function dsagdrConicUnsigned(r: number, R: number, K: number): number {
   const denom = 1 + s;
   if (!Number.isFinite(denom) || denom === 0) return NaN;
 
-  const A = (r * r) / R;
-  const dA = (2 * r) / R;
+  const absR = Math.abs(R);
+
+  const A = (r * r) / absR;
+  const dA = (2 * r) / absR;
   const dDenom = (-(1 + K) * r) / (R2 * s);
 
   return (dA * denom - A * dDenom) / (denom * denom);
@@ -47,18 +51,19 @@ export function surfaceNormal(surface: ConicSurface, p: Vec3): Vec3 {
   const r = Math.sqrt(p.x * p.x + p.y * p.y);
 
   if (!(r > 0)) {
-    return normalize({ x: 0, y: 0, z: surface.sagSign });
+    return normalize({ x: 0, y: 0, z: -1 });
   }
 
   const ds = dsagdrConicUnsigned(r, surface.R, surface.K);
   if (!Number.isFinite(ds)) {
-    return normalize({ x: 0, y: 0, z: surface.sagSign });
+    return normalize({ x: 0, y: 0, z: -1 });
   }
 
   const dsSigned = surface.sagSign * ds;
+
   return normalize({
-    x: -dsSigned * (p.x / r),
-    y: -dsSigned * (p.y / r),
-    z: surface.sagSign,
+    x: dsSigned * (p.x / r),
+    y: dsSigned * (p.y / r),
+    z: -1,
   });
 }

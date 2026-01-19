@@ -180,6 +180,8 @@ function traceRayCore(
           ? surfaceNormalConic(bestS.s, bestP)
           : normalize(bestS.s.nHat);
 
+      if (dot(ray.d, nHat) >= 0) break;
+
       const dNext = normalize(reflect(ray.d, nHat));
       ray = { o: nudgeOrigin(bestP, dNext), d: dNext };
       lastSurfaceId = bestS.id;
@@ -243,8 +245,8 @@ function rmsAtPlane(
 
   if (hits.length < 3) return { rms: NaN, rmsA: NaN, rmsB: NaN };
 
-  let sa = 0,
-    sb = 0;
+  let sa = 0;
+  let sb = 0;
   for (const h of hits) {
     sa += h.a;
     sb += h.b;
@@ -252,8 +254,8 @@ function rmsAtPlane(
   const ca = sa / hits.length;
   const cb = sb / hits.length;
 
-  let va = 0,
-    vb = 0;
+  let va = 0;
+  let vb = 0;
   for (const h of hits) {
     va += (h.a - ca) ** 2;
     vb += (h.b - cb) ** 2;
