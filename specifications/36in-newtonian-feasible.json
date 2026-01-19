@@ -1,0 +1,31 @@
+{
+  "id": "36in-newtonian-feasible",
+  "label": "36-inch Newtonian (feasible)",
+  "description": "Newtonian enabled: minBackFocus must be ~0 in current model; keep obstruction cap moderate and field radius realistic",
+  "topN": 25,
+  "spec": {
+    "aperture": 36,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 3,
+    "designKinds": ["newtonian", "cassegrain", "rc", "sct"],
+    "constraints": {
+      "maxTubeLength": 140,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 1.00,
+      "minBackFocus": 0,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 10,
+      "fieldUnits": "mm"
+    },
+    "coatings": { "reflectivityPerMirror": 0.92, "correctorTransmission": 0.95 },
+    "sweep": {
+      "primaryFRatioMin": 2.5,
+      "primaryFRatioMax": 4,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 8,
+      "systemFRatioMax": 12,
+      "systemFRatioStep": 1
+    },
+    "weights": { "usableLight": 0.35, "aberration": 0.35, "tubeLength": 0.2, "obstruction": 0.1 }
+  }
+}

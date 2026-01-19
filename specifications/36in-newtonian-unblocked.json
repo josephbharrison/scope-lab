@@ -1,0 +1,31 @@
+{
+  "id": "36in-newtonian-unblocked",
+  "label": "36-inch Newtonian (unblocked)",
+  "description": "Removes obstruction as a failing constraint; sets fully illuminated field to 0 so the secondary isn't inflated by field sizing",
+  "topN": 25,
+  "spec": {
+    "aperture": 36,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 3,
+    "designKinds": ["newtonian"],
+    "constraints": {
+      "maxTubeLength": 500,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 1.0,
+      "minBackFocus": 0,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 0,
+      "fieldUnits": "mm"
+    },
+    "coatings": { "reflectivityPerMirror": 0.92, "correctorTransmission": 0.95 },
+    "sweep": {
+      "primaryFRatioMin": 2.5,
+      "primaryFRatioMax": 6,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 3,
+      "systemFRatioMax": 3,
+      "systemFRatioStep": 1
+    },
+    "weights": { "usableLight": 0.35, "aberration": 0.35, "tubeLength": 0.2, "obstruction": 0.1 }
+  }
+}

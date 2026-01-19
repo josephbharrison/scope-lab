@@ -1,0 +1,31 @@
+{
+  "id": "36in-newtonian-sanity",
+  "label": "36-inch Newtonian (sanity)",
+  "description": "Newtonian-only sweep to validate secondary sizing + backfocus handling",
+  "topN": 25,
+  "spec": {
+    "aperture": 36,
+    "apertureUnits": "inch",
+    "targetSystemFRatio": 3,
+    "designKinds": ["newtonian"],
+    "constraints": {
+      "maxTubeLength": 160,
+      "tubeLengthUnits": "inch",
+      "maxObstructionRatio": 1.00,
+      "minBackFocus": 0,
+      "backFocusUnits": "mm",
+      "fullyIlluminatedFieldRadius": 5,
+      "fieldUnits": "mm"
+    },
+    "coatings": { "reflectivityPerMirror": 0.92, "correctorTransmission": 0.95 },
+    "sweep": {
+      "primaryFRatioMin": 2.5,
+      "primaryFRatioMax": 4,
+      "primaryFRatioStep": 0.25,
+      "systemFRatioMin": 3,
+      "systemFRatioMax": 3,
+      "systemFRatioStep": 1
+    },
+    "weights": { "usableLight": 0.4, "aberration": 0.3, "tubeLength": 0.2, "obstruction": 0.1 }
+  }
+}
