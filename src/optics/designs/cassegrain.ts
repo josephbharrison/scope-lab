@@ -110,7 +110,11 @@ export const cassegrain: DesignGenerator = (
     R_mm: -2 * layout.fPrimary_mm,
     K: -1,
     sagSign: -1,
-    aperture: { kind: "circle", radius_mm: 0.5 * D_mm },
+    aperture: {
+      kind: "circle",
+      radius_mm: 0.5 * D_mm,
+      innerRadius_mm: 0.5 * obstructionDiameter_mm,
+    },
     material: { kind: "reflector", reflectivity },
   };
 

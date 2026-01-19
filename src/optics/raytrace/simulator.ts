@@ -174,16 +174,25 @@ function traceRayCore(
         : { hitPoint: bestP };
     }
 
-    if (bestS.material.kind !== "reflector") break;
+    if (bestS.material.kind === "reflector") {
+      const nHat =
+        bestS.kind === "conic"
+          ? surfaceNormalConic(bestS.s, bestP)
+          : normalize(bestS.s.nHat);
 
-    const nHat =
-      bestS.kind === "conic"
-        ? surfaceNormalConic(bestS.s, bestP)
-        : normalize(bestS.s.nHat);
+      const dNext = normalize(reflect(ray.d, nHat));
+      ray = { o: nudgeOrigin(bestP, dNext), d: dNext };
+      lastSurfaceId = bestS.id;
+      continue;
+    }
 
-    const dNext = normalize(reflect(ray.d, nHat));
-    ray = { o: nudgeOrigin(bestP, dNext), d: dNext };
-    lastSurfaceId = bestS.id;
+    if (bestS.material.kind === "transmitter") {
+      ray = { o: nudgeOrigin(bestP, ray.d), d: ray.d };
+      lastSurfaceId = bestS.id;
+      continue;
+    }
+
+    break;
   }
 
   return record

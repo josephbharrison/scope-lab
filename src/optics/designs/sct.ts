@@ -108,7 +108,11 @@ export const sct: DesignGenerator = (spec, params, ctx): Candidate | null => {
     R_mm: -2 * layout.fPrimary_mm,
     K: -1,
     sagSign: -1,
-    aperture: { kind: "circle", radius_mm: 0.5 * D_mm },
+    aperture: {
+      kind: "circle",
+      radius_mm: 0.5 * D_mm,
+      innerRadius_mm: 0.5 * obstructionDiameter_mm,
+    },
     material: { kind: "reflector", reflectivity },
   };
 
@@ -127,7 +131,7 @@ export const sct: DesignGenerator = (spec, params, ctx): Candidate | null => {
     kind: "plane",
     id: "corrector",
     p0_mm: { x: 0, y: 0, z: -1 },
-    nHat: { x: 0, y: 0, z: 1 },
+    nHat: { x: 0, y: 0, z: -1 },
     aperture: { kind: "circle", radius_mm: 0.5 * D_mm },
     material: { kind: "transmitter", transmission: correctorTransmission },
   };
