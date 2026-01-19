@@ -8,6 +8,7 @@ export type Vec3 = {
 export type Aperture = {
   kind: "circle";
   radius_mm: number;
+  innerRadius_mm?: number;
 };
 
 export type Material = {

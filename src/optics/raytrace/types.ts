@@ -16,27 +16,12 @@ export type ConicSurface = {
   K: number;
   sagSign: -1 | 1;
   apertureRadius: number;
+  innerApertureRadius?: number;
 };
 
 export type PlaneSurface = {
   p0: Vec3;
   nHat: Vec3;
   apertureRadius: number;
-};
-
-export type TwoMirrorPrescription = {
-  primary: ConicSurface;
-  secondary: ConicSurface;
-  imagePlaneZ: number;
-  zStart: number;
-  pupilRadius: number;
-};
-
-export type ImageQualityResult = {
-  fieldAngle_rad: number;
-  spotRms_mm_onAxis: number;
-  spotRms_mm_edge: number;
-  spotRmsTan_mm_edge: number;
-  spotRmsSag_mm_edge: number;
-  bestFocusShift_mm_edge: number;
+  innerApertureRadius?: number;
 };

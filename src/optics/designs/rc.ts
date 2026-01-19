@@ -21,7 +21,7 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
   const Fp = params.primaryFRatio;
   const Fs = params.systemFRatio;
 
-  if (!(D_mm > 0 && Fp > 0 && Fs > 0 && Fs > Fp)) return null;
+  if (!(D_mm > 0 && Fp > 0 && Fs > Fp)) return null;
 
   const layout = twoMirrorLayout(spec, D_mm, Fp, Fs);
   if (!layout) return null;
@@ -31,73 +31,29 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
     layout.backFocus_mm +
     DEFAULT_TUBE_MARGIN_MM;
 
-  const maxTube_mm = toMm(
-    spec.constraints.maxTubeLength,
-    spec.constraints.tubeLengthUnits,
-  );
-
   const secondaryDiameter_mm = layout.secondaryDiameter_mm;
   const obstructionDiameter_mm = secondaryDiameter_mm * RC_BAFFLE_FACTOR;
   const obstructionRatio = obstructionDiameter_mm / D_mm;
 
   const reasons: string[] = [];
 
-  if (Number.isFinite(maxTube_mm) && tubeLength_mm > maxTube_mm) {
-    reasons.push(
-      `Tube length ${tubeLength_mm.toFixed(0)}mm exceeds max ${maxTube_mm.toFixed(0)}mm`,
-    );
-  }
+  const maxTube_mm = toMm(
+    spec.constraints.maxTubeLength,
+    spec.constraints.tubeLengthUnits,
+  );
+  if (Number.isFinite(maxTube_mm) && tubeLength_mm > maxTube_mm)
+    reasons.push("Tube too long");
 
   if (
     Number.isFinite(spec.constraints.maxObstructionRatio) &&
     obstructionRatio > spec.constraints.maxObstructionRatio
-  ) {
-    reasons.push(
-      `Obstruction ${obstructionRatio.toFixed(2)} exceeds max ${spec.constraints.maxObstructionRatio.toFixed(2)}`,
-    );
-  }
-
-  const minBackFocus_mm = clampNonNegativeFinite(
-    toMm(spec.constraints.minBackFocus, spec.constraints.backFocusUnits),
-  );
-
-  if (
-    Number.isFinite(minBackFocus_mm) &&
-    minBackFocus_mm > 0 &&
-    layout.backFocus_mm < minBackFocus_mm
-  ) {
-    reasons.push(
-      `Backfocus requires >= ${minBackFocus_mm.toFixed(0)}mm (current ${layout.backFocus_mm.toFixed(0)}mm)`,
-    );
-  }
+  )
+    reasons.push("Obstruction too large");
 
   const pass = reasons.length === 0;
 
-  const primaryArea_mm2 = areaCircle(D_mm);
-  const obstructionArea_mm2 = areaCircle(obstructionDiameter_mm);
-
-  const mirrorCount = 2;
   const reflectivity =
     spec.coatings.reflectivityPerMirror ?? DEFAULT_REFLECTIVITY_PER_MIRROR;
-
-  const transmissionFactor = Math.pow(reflectivity, mirrorCount);
-
-  const effectiveArea_mm2 =
-    (primaryArea_mm2 - obstructionArea_mm2) * transmissionFactor;
-
-  const usableLightEfficiency = effectiveArea_mm2 / primaryArea_mm2;
-
-  const fieldRadius_mm = clampNonNegativeFinite(
-    toMm(
-      spec.constraints.fullyIlluminatedFieldRadius,
-      spec.constraints.fieldUnits,
-    ),
-  );
-
-  const fieldAngle_rad =
-    fieldRadius_mm > 0 ? fieldRadius_mm / layout.fSystem_mm : 0;
-
-  const mMinus1 = Math.max(1e-6, layout.magnification - 1);
 
   const primary: SurfaceConic = {
     kind: "conic",
@@ -106,20 +62,34 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
     R_mm: -2 * layout.fPrimary_mm,
     K: -1.15,
     sagSign: -1,
-    aperture: { kind: "circle", radius_mm: 0.5 * D_mm },
+    aperture: {
+      kind: "circle",
+      radius_mm: 0.5 * D_mm,
+      innerRadius_mm: 0.5 * obstructionDiameter_mm,
+    },
     material: { kind: "reflector", reflectivity },
   };
 
+  const m = layout.magnification;
+
+  // src/optics/designs/rc.ts
   const secondary: SurfaceConic = {
     kind: "conic",
     id: "secondary",
     z0_mm: -layout.dPrimaryToSecondary_mm,
-    R_mm: 2 * (layout.fPrimary_mm / mMinus1),
+    R_mm: -2 * (layout.fPrimary_mm / (m - 1)),
     K: -2.4,
     sagSign: 1,
     aperture: { kind: "circle", radius_mm: 0.5 * secondaryDiameter_mm },
     material: { kind: "reflector", reflectivity },
   };
+
+  const fieldRadius_mm = clampNonNegativeFinite(
+    toMm(
+      spec.constraints.fullyIlluminatedFieldRadius,
+      spec.constraints.fieldUnits,
+    ),
+  );
 
   const sensorPlane: SurfacePlane = {
     kind: "plane",
@@ -136,25 +106,31 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
     entrance: {
       zStart_mm: -5 * layout.fPrimary_mm,
       pupilRadius_mm: 0.5 * D_mm,
-      fieldAngles_rad: [0, fieldAngle_rad],
+      fieldAngles_rad: [0, fieldRadius_mm / layout.fSystem_mm],
     },
     surfaces: [primary, secondary],
     sensor: { id: "sensor", plane: sensorPlane },
   };
 
   const sim = ctx.simulator.simulate(plan, ctx.scoringSampleSpec);
-  const iq = sim.imageQuality ?? [];
-  if (iq.length === 0) return null;
+  if (!sim.imageQuality || sim.imageQuality.length === 0) return null;
 
-  const iqOnAxis = iq[0];
-  const iqEdge = iq[iq.length - 1];
-  const aberrations = adaptRaytraceToMetrics(iqEdge, Fs, iqOnAxis);
+  const aberrations = adaptRaytraceToMetrics(
+    sim.imageQuality.at(-1)!,
+    Fs,
+    sim.imageQuality[0],
+  );
+
+  const primaryArea_mm2 = areaCircle(D_mm);
+  const obstructionArea_mm2 = areaCircle(obstructionDiameter_mm);
+
+  const effectiveArea_mm2 =
+    (primaryArea_mm2 - obstructionArea_mm2) * Math.pow(reflectivity, 2);
 
   return {
     id: plan.id,
     kind: "rc",
     plan,
-
     inputs: {
       aperture_mm: D_mm,
       primaryFRatio: Fp,
@@ -162,34 +138,28 @@ export const rc: DesignGenerator = (spec, params, ctx): Candidate | null => {
       primaryFocalLength_mm: layout.fPrimary_mm,
       systemFocalLength_mm: layout.fSystem_mm,
     },
-
     geometry: {
       tubeLength_mm,
       backFocus_mm: layout.backFocus_mm,
       secondaryDiameter_mm: obstructionDiameter_mm,
       obstructionRatio,
     },
-
     throughput: {
       primaryArea_mm2,
       effectiveArea_mm2,
-      usableLightEfficiency,
-      mirrorCount,
-      transmissionFactor,
+      usableLightEfficiency: effectiveArea_mm2 / primaryArea_mm2,
+      mirrorCount: 2,
+      transmissionFactor: Math.pow(reflectivity, 2),
     },
-
     aberrations,
-
     constraints: { pass, reasons },
-
     score: {
       total: 0,
       terms: { usableLight: 0, aberration: 0, obstruction: 0 },
     },
-
     audit: {
       scoringSampleSpec: ctx.scoringSampleSpec,
-      imageQuality: iq,
+      imageQuality: sim.imageQuality,
     },
   };
 };

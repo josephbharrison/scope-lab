@@ -3,9 +3,20 @@ import type { ConicSurface, PlaneSurface, Ray, Vec3 } from "./types";
 import { add, dot, mul, normalize, sub } from "./math";
 import { sagZ, dsagdrConicUnsigned, surfaceNormal } from "./surface";
 
+function withinAnnulus(
+  r2: number,
+  outerRadius: number,
+  innerRadius?: number,
+): boolean {
+  const outer2 = outerRadius * outerRadius;
+  const inner = innerRadius ?? 0;
+  const inner2 = inner * inner;
+  return r2 <= outer2 + 1e-12 && r2 >= inner2 - 1e-12;
+}
+
 function withinApertureConic(surface: ConicSurface, p: Vec3): boolean {
   const r2 = p.x * p.x + p.y * p.y;
-  return r2 <= surface.apertureRadius * surface.apertureRadius + 1e-12;
+  return withinAnnulus(r2, surface.apertureRadius, surface.innerApertureRadius);
 }
 
 function withinAperturePlane(surface: PlaneSurface, p: Vec3): boolean {
@@ -15,7 +26,7 @@ function withinAperturePlane(surface: PlaneSurface, p: Vec3): boolean {
   const dd = dx * dx + dy * dy + dz * dz;
   const proj = dot({ x: dx, y: dy, z: dz }, normalize(surface.nHat));
   const r2 = Math.max(0, dd - proj * proj);
-  return r2 <= surface.apertureRadius * surface.apertureRadius + 1e-12;
+  return withinAnnulus(r2, surface.apertureRadius, surface.innerApertureRadius);
 }
 
 export function reflect(d: Vec3, nHat: Vec3): Vec3 {
@@ -43,8 +54,13 @@ export function intersectConic(
     const f = p.z - zSurf;
     if (Math.abs(f) < 1e-9) {
       if (t < 0) return null;
+
       const hit = { x: p.x, y: p.y, z: zSurf };
       if (!withinApertureConic(surface, hit)) return null;
+
+      const nHat = surfaceNormal(surface, hit);
+      if (dot(ray.d, nHat) >= 0) return null;
+
       return { t, p: hit };
     }
 
@@ -87,36 +103,4 @@ export function intersectPlane(
 
 export function surfaceNormalConic(surface: ConicSurface, p: Vec3): Vec3 {
   return surfaceNormal(surface, p);
-}
-
-export function traceTwoMirror(
-  ray: Ray,
-  primary: ConicSurface,
-  secondary: ConicSurface,
-  imagePlaneZ: number,
-): Vec3 | null {
-  const h1 = intersectConic(primary, ray);
-  if (!h1) return null;
-
-  const n1 = surfaceNormalConic(primary, h1.p);
-  const d1 = reflect(ray.d, n1);
-
-  const r2: Ray = { o: h1.p, d: d1 };
-  const h2 = intersectConic(secondary, r2);
-  if (!h2) return null;
-
-  const n2 = surfaceNormalConic(secondary, h2.p);
-  const d2 = reflect(r2.d, n2);
-
-  const denom = d2.z;
-  if (!Number.isFinite(denom) || Math.abs(denom) < 1e-12) return null;
-
-  const t = (imagePlaneZ - h2.p.z) / denom;
-  if (!Number.isFinite(t) || t < 0) return null;
-
-  return {
-    x: h2.p.x + d2.x * t,
-    y: h2.p.y + d2.y * t,
-    z: imagePlaneZ,
-  };
 }
